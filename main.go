@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/httplog/v3"
 	"github.com/uc-cdis/workspace-proxy/config"
+	"github.com/uc-cdis/workspace-proxy/kubernetes"
 )
 
 func main() {
@@ -24,9 +25,11 @@ func main() {
 	slog.SetDefault(logger)
 
 	cfg := config.Load()
+	k8s := kubernetes.New()
 
 	logger.Info("workspace-proxy starting",
 		slog.String("listen", cfg.ListenAddr),
+		slog.Bool("k8s_discovery", k8s != nil),
 	)
 
 	r := chi.NewRouter()

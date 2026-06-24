@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"github.com/uc-cdis/workspace-proxy/config"
 	"github.com/uc-cdis/workspace-proxy/jeg"
 	"github.com/uc-cdis/workspace-proxy/kubernetes"
+	"github.com/uc-cdis/workspace-proxy/version"
 	"github.com/uc-cdis/workspace-proxy/workspace"
 )
 
@@ -67,6 +69,14 @@ func main() {
 		fmt.Fprint(w, "ok")
 	})
 
+	r.Get("/version", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"commit":  version.GitCommit,
+			"version": version.GitVersion,
+		})
+	})
+
 	// JEG ghost-gateway: intercept JupyterLab's GatewayClient traffic and apply billing gate.
 	if cfg.JEG.GatewayURL != "" {
 		r.HandleFunc("/jeg-proxy", jeg.ProxyHandler)
@@ -104,7 +114,7 @@ func main() {
 
 		logger.Info("shutdown signal received")
 
-		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
 		if err := srv.Shutdown(ctx); err != nil {

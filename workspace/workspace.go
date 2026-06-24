@@ -4,6 +4,10 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"log"
+	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -11,6 +15,7 @@ import (
 	"time"
 
 	"github.com/uc-cdis/workspace-proxy/kubernetes"
+	"github.com/uc-cdis/workspace-proxy/proxy"
 )
 
 const upstreamCacheTTL = 30 * time.Second
@@ -345,4 +350,112 @@ func listWorkspaceServices(ctx context.Context, k8s *kubernetes.Client) ([]kuber
 
 	storeSvcListCache(services)
 	return services, nil
+}
+
+const upstreamPrefix = proxy.UpstreamPrefix
+
+func ensureUpstreamPrefix(path string) string {
+	if path == "" {
+		return upstreamPrefix
+	}
+	if strings.HasPrefix(path, upstreamPrefix+"/") || path == upstreamPrefix {
+		return path
+	}
+	return upstreamPrefix + path
+}
+
+type HTTPServer struct {
+	K8s *kubernetes.Client
+}
+
+func NewHTTPClientProxy(k8s *kubernetes.Client) *HTTPServer {
+	return &HTTPServer{
+		K8s: k8s,
+	}
+}
+
+func (server *HTTPServer) ProxyHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	// start := time.Now()
+
+	// Enforce authentication: REMOTE_USER must be set by revproxy auth_request.
+	// Clients cannot forge it — revproxy strips any client-supplied REMOTE_USER.
+	remoteUserRaw := strings.TrimSpace(r.Header.Get("REMOTE_USER"))
+	identityRaw := strings.TrimSpace(r.Header.Get("X-Gen3-User-ID"))
+	if identityRaw == "" {
+		identityRaw = remoteUserRaw
+	}
+	remoteUser := NormalizeRemoteUser(identityRaw)
+	if remoteUser == "" {
+		remoteUser = NormalizeRemoteUser(remoteUserRaw)
+	}
+	if remoteUser == "" {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		// logAccess("", "", r.Method, r.URL.Path, http.StatusForbidden, time.Since(start))
+		return
+	}
+
+	// userHash := HashUser(remoteUser)
+
+	// Resolve the upstream by querying the K8s Service object (cached 30s).
+	// The Service's getambassador.io/config annotation contains the real host:port
+	// that Hatchery set at launch time — accounts for external nodes, ECS ALBs,
+	// GPU NodePorts, etc. Falls back to DNS+80 when annotation is absent.
+	upstreamStr, err := LookupUpstreamWithFallback(ctx, server.K8s, remoteUser, identityRaw, remoteUserRaw)
+	if err != nil {
+		uid := ParseRemoteUserID(identityRaw)
+		if uid == "" {
+			uid = ParseRemoteUserID(remoteUserRaw)
+		}
+		uidCandidate := ""
+		if uid != "" {
+			uidCandidate = fmt.Sprintf("%s, %s", uid, uid)
+		}
+		log.Printf(`{"time":%q,"msg":"upstream resolution failed","remote_user_header":%q,"identity_raw":%q,"remote_user_normalized":%q,"uid_candidate":%q,"error":%q}`,
+			time.Now().UTC().Format(time.RFC3339), remoteUserRaw, identityRaw, remoteUser, uidCandidate, err.Error())
+		http.Error(w, "Bad Gateway: workspace not running", http.StatusBadGateway)
+		// logAccess(userHash, "", r.Method, r.URL.Path, http.StatusBadGateway, time.Since(start))
+		return
+	}
+
+	target, _ := url.Parse(upstreamStr)
+
+	// With remoteKernelsBaseUrl active, all kernel/session API requests from the
+	// browser go to /jeg-proxy/ (jegProxyHandler). This handler only proxies
+	// container-local traffic: files, terminals, static assets, etc.
+
+	if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+		status := proxy.ProxyWebSocket(w, r, target)
+		fmt.Print(status)
+		// logAccess(userHash, upstreamStr, r.Method, r.URL.Path, status, time.Since(start))
+		return
+	}
+
+	// Cap non-WebSocket request bodies to 2 MiB to prevent memory exhaustion.
+	r.Body = http.MaxBytesReader(w, r.Body, 2*1024*1024)
+
+	sr := &proxy.StatusRecorder{ResponseWriter: w, Status: http.StatusOK}
+	proxy := &httputil.ReverseProxy{
+		Director: func(req *http.Request) {
+			req.URL.Scheme = target.Scheme
+			req.URL.Host = target.Host
+			req.Host = target.Host
+			// Restore prefix: nginx strips it, Jupyter expects it as its base URL.
+			req.URL.Path = ensureUpstreamPrefix(req.URL.Path)
+			if req.URL.RawPath != "" {
+				req.URL.RawPath = ensureUpstreamPrefix(req.URL.RawPath)
+			}
+		},
+		FlushInterval: 100 * time.Millisecond,
+	}
+	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+		// Evict both caches so the next request re-queries K8s — pod may have restarted,
+		// moved to a different node, or been replaced with a different port.
+		upstreamCache.Delete(remoteUser)
+		evictSvcListCache()
+		http.Error(w, "Bad Gateway: workspace unavailable", http.StatusBadGateway)
+		// logAccess(userHash, upstreamStr, r.Method, r.URL.Path, http.StatusBadGateway, time.Since(start))
+	}
+	proxy.ServeHTTP(sr, r)
+	// logAccess(userHash, upstreamStr, r.Method, r.URL.Path, sr.status, time.Since(start))
 }

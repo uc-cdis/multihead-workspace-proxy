@@ -65,7 +65,6 @@ type JEG struct {
 	sessionKernelOverrides sync.Map
 	knownJEGKernelIDs      sync.Map
 	knownJEGKernelIDsAge   sync.Map
-	parsedJEGPolicy        *jegKernelPolicy
 }
 
 func parseKernelSpecPolicy(raw string) (*jegKernelPolicy, error) {
@@ -398,7 +397,7 @@ func fetchLocalKernelspecs(microBase, remoteUser string) ([]byte, error) {
 // If no policy is configured, returns an empty kernelspecs object to prevent
 // JupyterLab from launching kernels directly without going through the billing panel.
 func (jeg *JEG) filterJEGKernelspecs(rawBody []byte) []byte {
-	if jeg.parsedJEGPolicy == nil || len(jeg.parsedJEGPolicy.AllowedSpecs) == 0 {
+	if jeg.kernelSpecPolicy == nil || len(jeg.kernelSpecPolicy.AllowedSpecs) == 0 {
 		// No policy: return empty spec list. JupyterLab sees "no kernels" in its picker.
 		return []byte(`{"default":"","kernelspecs":{}}`)
 	}
@@ -411,8 +410,8 @@ func (jeg *JEG) filterJEGKernelspecs(rawBody []byte) []byte {
 		return []byte(`{"default":"","kernelspecs":{}}`)
 	}
 
-	filtered := make(map[string]json.RawMessage, len(jeg.parsedJEGPolicy.AllowedSpecs))
-	for _, name := range jeg.parsedJEGPolicy.AllowedSpecs {
+	filtered := make(map[string]json.RawMessage, len(jeg.kernelSpecPolicy.AllowedSpecs))
+	for _, name := range jeg.kernelSpecPolicy.AllowedSpecs {
 		if spec, ok := raw.Kernelspecs[name]; ok {
 			// Inject cost/nodeType metadata into the spec.
 			// We do a minimal JSON merge: parse, add fields, re-encode.
@@ -428,9 +427,9 @@ func (jeg *JEG) filterJEGKernelspecs(rawBody []byte) []byte {
 					meta = map[string]interface{}{}
 					inner["metadata"] = meta
 				}
-				meta["costPerHour"] = jeg.parsedJEGPolicy.CostPerHour[name]
-				meta["nodeType"] = jeg.parsedJEGPolicy.NodeType[name]
-				if dn, ok := jeg.parsedJEGPolicy.DisplayNames[name]; ok {
+				meta["costPerHour"] = jeg.kernelSpecPolicy.CostPerHour[name]
+				meta["nodeType"] = jeg.kernelSpecPolicy.NodeType[name]
+				if dn, ok := jeg.kernelSpecPolicy.DisplayNames[name]; ok {
 					inner["display_name"] = dn
 				}
 				if b, err := json.Marshal(specObj); err == nil {
@@ -445,9 +444,9 @@ func (jeg *JEG) filterJEGKernelspecs(rawBody []byte) []byte {
 	defaultSpec := raw.Default
 	if _, ok := filtered[defaultSpec]; !ok {
 		defaultSpec = ""
-		if len(jeg.parsedJEGPolicy.AllowedSpecs) > 0 {
-			if _, ok := filtered[jeg.parsedJEGPolicy.AllowedSpecs[0]]; ok {
-				defaultSpec = jeg.parsedJEGPolicy.AllowedSpecs[0]
+		if len(jeg.kernelSpecPolicy.AllowedSpecs) > 0 {
+			if _, ok := filtered[jeg.kernelSpecPolicy.AllowedSpecs[0]]; ok {
+				defaultSpec = jeg.kernelSpecPolicy.AllowedSpecs[0]
 			}
 		}
 	}
@@ -1718,7 +1717,7 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 // unlike the ghost gateway (which returns empty when no policy to prevent direct launches)
 // the panel ALWAYS shows available specs so the user can pick one.
 func (jeg *JEG) filterJEGKernelspecsForPanel(rawBody []byte) []byte {
-	if jeg.parsedJEGPolicy == nil || len(jeg.parsedJEGPolicy.AllowedSpecs) == 0 {
+	if jeg.kernelSpecPolicy == nil || len(jeg.kernelSpecPolicy.AllowedSpecs) == 0 {
 		// No policy: return all specs from JEG so the panel can show everything.
 		return rawBody
 	}
@@ -1731,8 +1730,8 @@ func (jeg *JEG) filterJEGKernelspecsForPanel(rawBody []byte) []byte {
 		return rawBody
 	}
 
-	filtered := make(map[string]json.RawMessage, len(jeg.parsedJEGPolicy.AllowedSpecs))
-	for _, name := range jeg.parsedJEGPolicy.AllowedSpecs {
+	filtered := make(map[string]json.RawMessage, len(jeg.kernelSpecPolicy.AllowedSpecs))
+	for _, name := range jeg.kernelSpecPolicy.AllowedSpecs {
 		spec, ok := raw.Kernelspecs[name]
 		if !ok {
 			continue
@@ -1750,9 +1749,9 @@ func (jeg *JEG) filterJEGKernelspecsForPanel(rawBody []byte) []byte {
 				meta = map[string]interface{}{}
 				inner["metadata"] = meta
 			}
-			meta["costPerHour"] = jeg.parsedJEGPolicy.CostPerHour[name]
-			meta["nodeType"] = jeg.parsedJEGPolicy.NodeType[name]
-			if dn, ok := jeg.parsedJEGPolicy.DisplayNames[name]; ok {
+			meta["costPerHour"] = jeg.kernelSpecPolicy.CostPerHour[name]
+			meta["nodeType"] = jeg.kernelSpecPolicy.NodeType[name]
+			if dn, ok := jeg.kernelSpecPolicy.DisplayNames[name]; ok {
 				inner["display_name"] = dn
 			}
 			if b, err := json.Marshal(specObj); err == nil {
@@ -1766,7 +1765,7 @@ func (jeg *JEG) filterJEGKernelspecsForPanel(rawBody []byte) []byte {
 	defaultSpec := raw.Default
 	if _, ok := filtered[defaultSpec]; !ok {
 		defaultSpec = ""
-		for _, name := range jeg.parsedJEGPolicy.AllowedSpecs {
+		for _, name := range jeg.kernelSpecPolicy.AllowedSpecs {
 			if _, ok := filtered[name]; ok {
 				defaultSpec = name
 				break
@@ -1966,9 +1965,9 @@ func (jeg *JEG) PanelHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Billing gate: when a policy is configured, only allowedSpecs may be launched.
-		if jeg.parsedJEGPolicy != nil && len(jeg.parsedJEGPolicy.AllowedSpecs) > 0 {
+		if jeg.kernelSpecPolicy != nil && len(jeg.kernelSpecPolicy.AllowedSpecs) > 0 {
 			allowed := false
-			for _, s := range jeg.parsedJEGPolicy.AllowedSpecs {
+			for _, s := range jeg.kernelSpecPolicy.AllowedSpecs {
 				if s == launchReq.Name {
 					allowed = true
 					break

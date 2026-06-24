@@ -11,7 +11,7 @@ ENV GOARCH=${TARGETARCH}
 ENV GOTOOLCHAIN=go1.26.4
 
 FROM base AS builder
-WORKDIR $GOPATH/src/github.com/uc-cdis/$appname/
+WORKDIR $GOPATH/src/github.com/uc-cdis/multihead-workspace-proxy/
 
 COPY go.mod go.sum ./
 RUN go mod download
@@ -21,14 +21,14 @@ COPY . .
 RUN GITCOMMIT=$(git rev-parse HEAD) \
     GITVERSION=$(git describe --always --tags) \
     && go build \
-    -ldflags="-X 'github.com/uc-cdis/$appname/version.GitCommit=${GITCOMMIT}' -X 'github.com/uc-cdis/$appname/version.GitVersion=${GITVERSION}'" \
-    -o /$appname
+    -ldflags="-X 'github.com/uc-cdis/multihead-workspace-proxy/version.GitCommit=${GITCOMMIT}' -X 'github.com/uc-cdis/multihead-workspace-proxy/version.GitVersion=${GITVERSION}'" \
+    -o /multihead-workspace-proxy
 
 RUN echo "nobody:x:65534:65534:Nobody:/:" > /etc_passwd
 
 FROM scratch
 COPY --from=builder /etc_passwd /etc/passwd
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
-COPY --from=builder /$appname /$appname
+COPY --from=builder /multihead-workspace-proxy /multihead-workspace-proxy
 USER nobody
-CMD ["/$appname"]
+CMD ["/multihead-workspace-proxy"]

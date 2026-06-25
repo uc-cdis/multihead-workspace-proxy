@@ -164,7 +164,7 @@ func (k8s *Client) GetWorkspaceService(ctx context.Context, name string) (K8sSer
 	}
 	defer resp.Body.Close()
 
-	log.Printf("!!!6%+v", resp.Body)
+	log.Printf("!!!6%+v", string(body))
 	log.Printf("!!!7%+v", resp.StatusCode)
 	log.Printf("!!!8%+v", resp.Status)
 
@@ -188,6 +188,7 @@ func (k8s *Client) GetWorkspaceService(ctx context.Context, name string) (K8sSer
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		log.Printf("!!!xxx %+v", err)
 		return K8sService{}, fmt.Errorf("decode Kubernetes service response: %w", err)
 	}
 

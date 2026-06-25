@@ -550,6 +550,7 @@ func isValidKernelID(s string) bool {
 	}
 	return true
 }
+
 func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	start := time.Now()

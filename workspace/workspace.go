@@ -349,6 +349,8 @@ func listWorkspaceServices(ctx context.Context, k8s *kubernetes.Client) ([]kuber
 		return []kubernetes.K8sService{}, err
 	}
 
+	log.Printf("%+v", services)
+
 	storeSvcListCache(services)
 	return services, nil
 }

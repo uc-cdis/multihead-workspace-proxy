@@ -125,6 +125,8 @@ func (k8s *Client) GetWorkspaceService(ctx context.Context, name string) (K8sSer
 		return K8sService{}, fmt.Errorf("sa token unavailable: %w", err)
 	}
 
+	log.Printf("!!!4%+v", name)
+
 	apiURL := fmt.Sprintf(
 		"%s/api/v1/namespaces/%s/services/%s",
 		k8s.apiBase,
@@ -136,6 +138,8 @@ func (k8s *Client) GetWorkspaceService(ctx context.Context, name string) (K8sSer
 	if err != nil {
 		return K8sService{}, fmt.Errorf("create Kubernetes service request: %w", err)
 	}
+
+	log.Printf("!!!5%+v", name)
 
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/json")
@@ -168,6 +172,8 @@ func (k8s *Client) GetWorkspaceService(ctx context.Context, name string) (K8sSer
 	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
 		return K8sService{}, fmt.Errorf("decode Kubernetes service response: %w", err)
 	}
+
+	log.Printf("!!!5%+v", raw)
 
 	var port int32
 	if len(raw.Spec.Ports) > 0 {

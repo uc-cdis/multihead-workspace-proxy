@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -365,18 +366,19 @@ func ensureUpstreamPrefix(path string) string {
 }
 
 type HTTPServer struct {
-	K8s *kubernetes.Client
+	logger *slog.Logger
+	K8s    *kubernetes.Client
 }
 
-func NewHTTPClientProxy(k8s *kubernetes.Client) *HTTPServer {
+func NewHTTPClientProxy(logger *slog.Logger, k8s *kubernetes.Client) *HTTPServer {
 	return &HTTPServer{
-		K8s: k8s,
+		logger: logger,
+		K8s:    k8s,
 	}
 }
 
 func (server *HTTPServer) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	// start := time.Now()
 
 	// Enforce authentication: REMOTE_USER must be set by revproxy auth_request.
 	// Clients cannot forge it — revproxy strips any client-supplied REMOTE_USER.
@@ -391,11 +393,17 @@ func (server *HTTPServer) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if remoteUser == "" {
 		http.Error(w, "Forbidden", http.StatusForbidden)
-		// logAccess("", "", r.Method, r.URL.Path, http.StatusForbidden, time.Since(start))
+		server.logger.WarnContext(r.Context(), "access",
+			slog.String("user_hash", ""),
+			slog.String("upstream", ""),
+			slog.String("method", r.Method),
+			slog.String("path", r.URL.Path),
+			slog.Int("status", http.StatusForbidden),
+		)
 		return
 	}
 
-	// userHash := HashUser(remoteUser)
+	userHash := HashUser(remoteUser)
 
 	// Resolve the upstream by querying the K8s Service object (cached 30s).
 	// The Service's getambassador.io/config annotation contains the real host:port
@@ -414,7 +422,14 @@ func (server *HTTPServer) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 		log.Printf(`{"time":%q,"msg":"upstream resolution failed","remote_user_header":%q,"identity_raw":%q,"remote_user_normalized":%q,"uid_candidate":%q,"error":%q}`,
 			time.Now().UTC().Format(time.RFC3339), remoteUserRaw, identityRaw, remoteUser, uidCandidate, err.Error())
 		http.Error(w, "Bad Gateway: workspace not running", http.StatusBadGateway)
-		// logAccess(userHash, "", r.Method, r.URL.Path, http.StatusBadGateway, time.Since(start))
+
+		server.logger.ErrorContext(r.Context(), "access",
+			slog.String("user_hash", userHash),
+			slog.String("upstream", ""),
+			slog.String("method", r.Method),
+			slog.String("path", r.URL.Path),
+			slog.Int("status", http.StatusBadGateway),
+		)
 		return
 	}
 
@@ -427,7 +442,13 @@ func (server *HTTPServer) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 	if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
 		status := proxy.ProxyWebSocket(w, r, target)
 		fmt.Print(status)
-		// logAccess(userHash, upstreamStr, r.Method, r.URL.Path, status, time.Since(start))
+		server.logger.InfoContext(r.Context(), "access",
+			slog.String("user_hash", userHash),
+			slog.String("upstream", upstreamStr),
+			slog.String("method", r.Method),
+			slog.String("path", r.URL.Path),
+			slog.Int("status", status),
+		)
 		return
 	}
 
@@ -454,8 +475,20 @@ func (server *HTTPServer) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 		upstreamCache.Delete(remoteUser)
 		evictSvcListCache()
 		http.Error(w, "Bad Gateway: workspace unavailable", http.StatusBadGateway)
-		// logAccess(userHash, upstreamStr, r.Method, r.URL.Path, http.StatusBadGateway, time.Since(start))
+		server.logger.ErrorContext(r.Context(), "access",
+			slog.String("user_hash", userHash),
+			slog.String("upstream", upstreamStr),
+			slog.String("method", r.Method),
+			slog.String("path", r.URL.Path),
+			slog.Int("status", http.StatusBadGateway),
+		)
 	}
 	proxy.ServeHTTP(sr, r)
-	// logAccess(userHash, upstreamStr, r.Method, r.URL.Path, sr.status, time.Since(start))
+	server.logger.InfoContext(r.Context(), "access",
+		slog.String("user_hash", userHash),
+		slog.String("upstream", upstreamStr),
+		slog.String("method", r.Method),
+		slog.String("path", r.URL.Path),
+		slog.Int("status", sr.Status),
+	)
 }

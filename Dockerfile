@@ -31,4 +31,5 @@ COPY --from=builder /etc_passwd /etc/passwd
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=builder /multihead-workspace-proxy /multihead-workspace-proxy
 USER nobody
+ENTRYPOINT ["/multihead-workspace-proxy"]
 CMD ["/multihead-workspace-proxy"]

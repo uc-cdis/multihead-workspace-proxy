@@ -109,7 +109,7 @@ func main() {
 	slog.SetDefault(logger)
 
 	cfg := config.Load()
-	k8s := kubernetes.New()
+	k8s := kubernetes.New(cfg.WorkspaceNamespace)
 	jeg := jeg.New(logger, k8s, cfg.JEG.GatewayURL, cfg.JEG.KernelSpecPolicy)
 	proxy := workspace.NewHTTPClientProxy(logger, k8s)
 

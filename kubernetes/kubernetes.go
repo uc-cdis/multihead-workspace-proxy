@@ -217,7 +217,7 @@ func (c *Client) bearerToken() (string, error) {
 	return strings.TrimSpace(string(b)), nil
 }
 
-func New() *Client {
+func New(namespace string) *Client {
 	// Verify the token file exists at startup so we can log clearly if not in-cluster.
 	if _, err := os.ReadFile(tokenPath); err != nil {
 		log.Printf(`{"msg":"no SA token — falling back to plain DNS (not in-cluster?)","detail":%q}`, err.Error())
@@ -237,5 +237,6 @@ func New() *Client {
 		},
 		tokenPath: tokenPath,
 		apiBase:   apiBase,
+		namespace: namespace,
 	}
 }

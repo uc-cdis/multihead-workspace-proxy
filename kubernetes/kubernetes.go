@@ -135,6 +135,8 @@ func (k8s *Client) GetWorkspaceService(ctx context.Context, name string) (K8sSer
 		name,
 	)
 
+	log.Printf("!!!zzz %+v", apiURL)
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
 	if err != nil {
 		return K8sService{}, fmt.Errorf("create Kubernetes service request: %w", err)

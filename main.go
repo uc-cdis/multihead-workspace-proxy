@@ -111,7 +111,7 @@ func main() {
 	cfg := config.Load()
 	k8s := kubernetes.New()
 	jeg := jeg.New(logger, k8s, cfg.JEG.GatewayURL, cfg.JEG.KernelSpecPolicy)
-	proxy := workspace.NewHTTPClientProxy(k8s)
+	proxy := workspace.NewHTTPClientProxy(logger, k8s)
 
 	server := &http.Server{
 		Addr:              cfg.ListenAddr,

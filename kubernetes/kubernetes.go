@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -147,6 +148,16 @@ func (k8s *Client) GetWorkspaceService(ctx context.Context, name string) (K8sSer
 	resp, err := k8s.http.Do(req)
 	if err != nil {
 		return K8sService{}, fmt.Errorf("k8s API unreachable: %w", err)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		return K8sService{}, fmt.Errorf(
+			"k8s API error: status=%s body=%s",
+			resp.Status,
+			string(body),
+		)
 	}
 	defer resp.Body.Close()
 

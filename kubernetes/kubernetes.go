@@ -150,6 +150,10 @@ func (k8s *Client) GetWorkspaceService(ctx context.Context, name string) (K8sSer
 	}
 	defer resp.Body.Close()
 
+	log.Printf("!!!6%+v", resp.Body)
+	log.Printf("!!!7%+v", resp.StatusCode)
+	log.Printf("!!!8%+v", resp.Status)
+
 	if resp.StatusCode == http.StatusNotFound {
 		return K8sService{}, fmt.Errorf("workspace service %q not found — pod not running", name)
 	}
@@ -173,7 +177,7 @@ func (k8s *Client) GetWorkspaceService(ctx context.Context, name string) (K8sSer
 		return K8sService{}, fmt.Errorf("decode Kubernetes service response: %w", err)
 	}
 
-	log.Printf("!!!6%+v", raw)
+	log.Printf("!!!9%+v", raw)
 
 	var port int32
 	if len(raw.Spec.Ports) > 0 {

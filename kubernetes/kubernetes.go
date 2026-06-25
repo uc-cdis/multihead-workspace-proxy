@@ -153,6 +153,7 @@ func (k8s *Client) GetWorkspaceService(ctx context.Context, name string) (K8sSer
 	body, _ := io.ReadAll(resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
+		log.Printf("!!!0 %+v", string(body))
 		return K8sService{}, fmt.Errorf(
 			"k8s API error: status=%s body=%s",
 			resp.Status,

@@ -207,6 +207,10 @@ func evictSvcListCache() {
 // lookupUpstream returns the HTTP upstream base URL for the given username,
 // using the cache when valid and querying K8s when not.
 func lookupUpstream(ctx context.Context, k8s *kubernetes.Client, username string) (string, error) {
+
+	log.Printf("%+v", username)
+	log.Printf("%+v", &upstreamCache)
+
 	if v, ok := upstreamCache.Load(username); ok {
 		entry := v.(*upstreamEntry)
 		if time.Now().Before(entry.expires) {
@@ -416,6 +420,12 @@ func (server *HTTPServer) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 		)
 		return
 	}
+
+	server.logger.InfoContext(r.Context(), "!!!1",
+		slog.String("remoteUserRaw", remoteUserRaw),
+		slog.String("remoteUser", remoteUser),
+		slog.String("identityRaw", identityRaw),
+	)
 
 	userHash := HashUser(remoteUser)
 

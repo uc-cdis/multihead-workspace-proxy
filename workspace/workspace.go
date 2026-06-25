@@ -249,6 +249,8 @@ func lookupByAnnotationRemoteUser(k8s *kubernetes.Client, username, identityRaw,
 	annotatedServiceCount := 0
 	soleAnnotatedUpstream := ""
 
+	log.Printf("%+v", svcs)
+
 	for _, svc := range svcs {
 		annotYAML := svc.Annotations["getambassador.io/config"]
 		if annotYAML == "" {
@@ -343,6 +345,8 @@ func listWorkspaceServices(ctx context.Context, k8s *kubernetes.Client) ([]kuber
 	if entry := loadSvcListCache(); entry != nil && time.Now().Before(entry.expires) {
 		return entry.items, nil
 	}
+
+	log.Printf("listWorkspaceServices")
 
 	services, err := k8s.ListWorkspaceServices(ctx)
 	if err != nil {

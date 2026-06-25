@@ -57,7 +57,9 @@ func (k8s *Client) ListWorkspaceServices(ctx context.Context) ([]K8sService, err
 	}
 
 	apiURL := fmt.Sprintf("%s/api/v1/namespaces/%s/services", k8s.apiBase, k8s.namespace)
+	log.Printf("%+v", apiURL)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+	log.Printf("%+v", req)
 	if err != nil {
 		return nil, fmt.Errorf("create Kubernetes services request: %w", err)
 	}
@@ -89,9 +91,13 @@ func (k8s *Client) ListWorkspaceServices(ctx context.Context) ([]K8sService, err
 		} `json:"items"`
 	}
 
+	log.Printf("%+v", resp.Body)
+
 	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
 		return nil, fmt.Errorf("decode Kubernetes services response: %w", err)
 	}
+
+	log.Printf("%+v", raw)
 
 	services := make([]K8sService, 0, len(raw.Items))
 	for _, item := range raw.Items {
@@ -107,6 +113,8 @@ func (k8s *Client) ListWorkspaceServices(ctx context.Context) ([]K8sService, err
 			Annotations: item.Metadata.Annotations,
 		})
 	}
+
+	log.Printf("%+v", services)
 
 	return services, nil
 }

@@ -291,6 +291,10 @@ func LookupUpstreamWithFallback(ctx context.Context, k8s *kubernetes.Client, use
 		return upstream, nil
 	}
 
+	log.Printf("\t%+v\n", username)
+	log.Printf("\t%+v\n", identityRaw)
+	log.Printf("\t%+v\n", remoteUserHeader)
+
 	uid := ParseRemoteUserID(identityRaw)
 	if uid == "" {
 		uid = ParseRemoteUserID(remoteUserHeader)
@@ -298,9 +302,13 @@ func LookupUpstreamWithFallback(ctx context.Context, k8s *kubernetes.Client, use
 	if uid == "" {
 		return lookupByAnnotationRemoteUser(k8s, username, identityRaw, remoteUserHeader)
 	}
+	log.Printf("\t%+v\n", uid)
 	// Hatchery can derive service names from "<uid>, <uid>" (e.g. "4, 4" -> h-4-2c-204-s).
 	uidHatcheryUser := fmt.Sprintf("%s, %s", uid, uid)
 	upstreamByUID, uidErr := lookupUpstream(ctx, k8s, uidHatcheryUser)
+
+	log.Printf("\t%+v\n", uidHatcheryUser)
+	log.Printf("\t%+v\n", upstreamByUID)
 	if uidErr != nil {
 		annotationUpstream, annotErr := lookupByAnnotationRemoteUser(k8s, username, identityRaw, remoteUserHeader)
 		if annotErr != nil {

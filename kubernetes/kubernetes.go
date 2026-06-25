@@ -173,7 +173,7 @@ func (k8s *Client) GetWorkspaceService(ctx context.Context, name string) (K8sSer
 		return K8sService{}, fmt.Errorf("decode Kubernetes service response: %w", err)
 	}
 
-	log.Printf("!!!5%+v", raw)
+	log.Printf("!!!6%+v", raw)
 
 	var port int32
 	if len(raw.Spec.Ports) > 0 {

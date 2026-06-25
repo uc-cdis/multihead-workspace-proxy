@@ -224,7 +224,7 @@ func lookupUpstream(ctx context.Context, k8s *kubernetes.Client, username string
 	log.Printf("!!!2%+v", svcName)
 
 	upstream, err := resolveUpstream(ctx, k8s, svcName)
-	log.Printf("!!!3%+v", upstream)
+	log.Printf("!!!3a%+v", upstream)
 	if err != nil {
 		return "", err
 	}
@@ -341,8 +341,8 @@ func LookupUpstreamWithFallback(ctx context.Context, k8s *kubernetes.Client, use
 // resolveUpstream fetches the K8s Service object and returns the upstream URL,
 // preferring the host:port from the getambassador.io/config annotation.
 func resolveUpstream(ctx context.Context, k8s *kubernetes.Client, serviceName string) (string, error) {
-	log.Printf("!!!3%+v", serviceName)
-	log.Printf("!!!3%+v", workspaceNS)
+	log.Printf("!!!3b%+v", serviceName)
+	log.Printf("!!!3c%+v", workspaceNS)
 	if k8s == nil {
 		// Not in-cluster (local dev without service account) — plain DNS + port 80.
 		return fmt.Sprintf("http://%s.%s.svc.cluster.local:80", serviceName, workspaceNS), nil

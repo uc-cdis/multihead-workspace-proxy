@@ -205,6 +205,9 @@ func ProxyToContainer(w http.ResponseWriter, r *http.Request, containerPath, mic
 		req.Header[key] = r.Header[key]
 	}
 	req.Header.Set("REMOTE_USER", remoteUser)
+	req.Header.Set("X-Remote-User", remoteUser)
+	req.Header.Set("KERNEL_USERNAME", remoteUser)
+
 	if r.URL.RawQuery != "" {
 		req.URL.RawQuery = r.URL.RawQuery
 	}

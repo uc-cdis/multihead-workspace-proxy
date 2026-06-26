@@ -583,6 +583,9 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Common upstream headers forwarded to JEG.
 	forwardJEGHeaders := func(req *http.Request) {
+		log.Printf("REMOTE_USER %+v", remoteUser)
+		log.Printf("remote_user %+v", remoteUser)
+
 		req.Header.Set("REMOTE_USER", remoteUser)
 		req.Header.Set("remote_user", remoteUser)
 		req.Header.Del("Connection")
@@ -1462,6 +1465,8 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 
 	// GET /api/kernels — merge container running kernels + JEG running kernels.
 	if method == http.MethodGet && jegPath == "/api/kernels" {
+		log.Printf("jegPath %+v", jegPath)
+
 		type kernelEntry = json.RawMessage
 		var merged []kernelEntry
 		jegIDs := map[string]struct{}{}
@@ -1469,10 +1474,13 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 		// Fetch from JEG.
 		jegReq, _ := http.NewRequest(http.MethodGet, jeg.gatewayURL+"/api/kernels", nil)
 		forwardJEGHeaders(jegReq)
+		log.Printf("jegReq %+v", jegReq)
+
 		if jegResp, err := http.DefaultClient.Do(jegReq); err == nil {
 			defer jegResp.Body.Close()
 			var jegKernels []kernelEntry
 			if jegBody, err := io.ReadAll(jegResp.Body); err == nil {
+				log.Printf("jegBody %+v", jegBody)
 				_ = json.Unmarshal(jegBody, &jegKernels)
 				for _, entry := range jegKernels {
 					var k struct {

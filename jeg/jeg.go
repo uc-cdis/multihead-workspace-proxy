@@ -584,10 +584,10 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 	// Common upstream headers forwarded to JEG.
 	forwardJEGHeaders := func(req *http.Request) {
 		log.Printf("REMOTE_USER %+v", remoteUser)
-		log.Printf("remote_user %+v", remoteUser)
+		// log.Printf("remote_user %+v", remoteUser)
 
 		req.Header.Set("REMOTE_USER", remoteUser)
-		req.Header.Set("remote_user", remoteUser)
+		// req.Header.Set("remote_user", remoteUser)
 		req.Header.Del("Connection")
 		req.Header.Del("Upgrade")
 	}

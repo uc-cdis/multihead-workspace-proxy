@@ -1474,13 +1474,12 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 		// Fetch from JEG.
 		jegReq, _ := http.NewRequest(http.MethodGet, jeg.gatewayURL+"/api/kernels", nil)
 		forwardJEGHeaders(jegReq)
-		log.Printf("jegReq %+v", jegReq)
 
 		if jegResp, err := http.DefaultClient.Do(jegReq); err == nil {
 			defer jegResp.Body.Close()
 			var jegKernels []kernelEntry
 			if jegBody, err := io.ReadAll(jegResp.Body); err == nil {
-				log.Printf("jegBody %+v", jegBody)
+				log.Printf("jegBody %+v", string(jegBody))
 				_ = json.Unmarshal(jegBody, &jegKernels)
 				for _, entry := range jegKernels {
 					var k struct {

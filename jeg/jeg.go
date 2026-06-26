@@ -1833,7 +1833,9 @@ func (jeg *JEG) PanelHandler(w http.ResponseWriter, r *http.Request) {
 
 	forwardHeaders := func(req *http.Request) {
 		req.Header.Set("REMOTE_USER", remoteUser)
-		req.Header.Set("remote_user", remoteUser)
+		// req.Header.Set("remote_user", remoteUser)
+		req.Header.Set("X-Remote-User", remoteUser)
+		req.Header.Set("KERNEL_USERNAME", remoteUser)
 		req.Header.Del("Connection")
 		req.Header.Del("Upgrade")
 	}

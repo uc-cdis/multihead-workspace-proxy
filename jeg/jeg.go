@@ -225,31 +225,22 @@ func (jeg *JEG) isKnownJEGKernelID(id string) bool {
 	return ok
 }
 
-// jegHasKernel asks JEG directly whether the kernel ID exists for this user.
+// jegHasKernel verifies kernel ownership for this user using JEG's filtered
+// list endpoint (/api/kernels), avoiding reliance on direct ID lookups.
 // Used as a routing discriminator because container /api/kernels/{id} may proxy
 // through GatewayClient and return JEG-owned kernels as 200.
 func (jeg *JEG) jegHasKernel(kernelID, remoteUser string) bool {
-	if jeg.gatewayURL == "" {
+	kernelID = strings.TrimSpace(kernelID)
+	if jeg.gatewayURL == "" || kernelID == "" {
 		return false
 	}
-	upstream := strings.TrimRight(jeg.gatewayURL, "/") + "/api/kernels/" + kernelID
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, upstream, nil)
-	if err != nil {
-		return false
+	for _, k := range jeg.listJEGKernels(remoteUser) {
+		if strings.TrimSpace(k.ID) == kernelID {
+			jeg.rememberJEGKernelID(kernelID)
+			return true
+		}
 	}
-	req.Header.Set("REMOTE_USER", remoteUser)
-	req.Header.Set("remote_user", remoteUser)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return false
-	}
-	_ = resp.Body.Close()
-	if resp.StatusCode == http.StatusOK {
-		jeg.rememberJEGKernelID(kernelID)
-	}
-	return resp.StatusCode == http.StatusOK
+	return false
 }
 
 // findJEGKernelIDByName returns the first active JEG kernel ID that matches the
@@ -291,7 +282,8 @@ func (jeg *JEG) findJEGKernelIDByName(remoteUser, kernelName string) string {
 	return ""
 }
 
-// findJEGKernelNameByID resolves a running JEG kernel name by ID.
+// findJEGKernelNameByID resolves a running JEG kernel name by ID, scoped to
+// kernels visible to the current user.
 func (jeg *JEG) findJEGKernelNameByID(remoteUser, kernelID string) string {
 	if jeg.gatewayURL == "" {
 		return ""
@@ -300,38 +292,13 @@ func (jeg *JEG) findJEGKernelNameByID(remoteUser, kernelID string) string {
 	if kernelID == "" {
 		return ""
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(jeg.gatewayURL, "/")+"/api/kernels/"+kernelID, nil)
-	if err != nil {
-		return ""
-	}
-	req.Header.Set("REMOTE_USER", remoteUser)
-	req.Header.Set("remote_user", remoteUser)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return ""
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusNotFound {
-		jeg.forgetJEGKernelID(kernelID)
-		return ""
-	}
-	if resp.StatusCode != http.StatusOK {
-		return ""
-	}
-	var kernel struct {
-		ID   string `json:"id"`
-		Name string `json:"name"`
-	}
-	if b, err := io.ReadAll(resp.Body); err == nil {
-		if json.Unmarshal(b, &kernel) == nil {
-			if strings.TrimSpace(kernel.ID) != "" {
-				jeg.rememberJEGKernelID(kernel.ID)
-			}
+	for _, kernel := range jeg.listJEGKernels(remoteUser) {
+		if strings.TrimSpace(kernel.ID) == kernelID {
+			jeg.rememberJEGKernelID(kernelID)
 			return strings.TrimSpace(kernel.Name)
 		}
 	}
+	jeg.forgetJEGKernelID(kernelID)
 	return ""
 }
 

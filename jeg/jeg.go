@@ -651,7 +651,7 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 					cStatus, cHdr, cBody, cErr := proxySessionToContainerBuffered()
 					if cErr == nil && cStatus == http.StatusOK {
 						writeResponse(cStatus, cHdr, cBody)
-						jeg.logger.InfoContext(ctx, "access",
+						jeg.logger.InfoContext(ctx, "access5",
 							slog.String("user", userHash),
 							slog.String("microsupstream", microUpstream),
 							slog.String("method", method),
@@ -667,7 +667,7 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusOK)
 					_, _ = w.Write(out)
-					jeg.logger.InfoContext(r.Context(), "access",
+					jeg.logger.InfoContext(r.Context(), "access4",
 						slog.String("user_hash", userHash),
 						slog.String("action", "override"),
 						slog.String("method", method),
@@ -678,7 +678,7 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 				http.Error(w, "session not found", http.StatusNotFound)
-				jeg.logger.InfoContext(r.Context(), "access",
+				jeg.logger.InfoContext(r.Context(), "access6",
 					slog.String("user_hash", userHash),
 					slog.String("method", method),
 					slog.String("path", r.URL.Path),
@@ -751,7 +751,7 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Cache-Control", "no-store")
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write(result)
-			jeg.logger.InfoContext(r.Context(), "access",
+			jeg.logger.InfoContext(r.Context(), "access7",
 				slog.String("user_hash", userHash),
 				slog.String("upstream", microUpstream),
 				slog.String("method", method),
@@ -795,7 +795,7 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 					status, hdr, respBody, err := proxySessionToContainerBuffered()
 					if err == nil && status < 400 {
 						writeResponse(status, hdr, respBody)
-						jeg.logger.InfoContext(r.Context(), "access",
+						jeg.logger.InfoContext(r.Context(), "access8",
 							slog.String("user_hash", userHash),
 							slog.String("upstream", microUpstream),
 							slog.String("method", method),
@@ -842,7 +842,7 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusCreated)
 				_, _ = w.Write(out)
 				log.Printf(`{"msg":"jeg session post synthesized","user_hash":%q,"session_id":%q,"kernel_id":%q}`, userHash, newSessionID, jegKernelID)
-				jeg.logger.InfoContext(r.Context(), "access",
+				jeg.logger.InfoContext(r.Context(), "access9",
 					slog.String("user_hash", userHash),
 					slog.String("upstream", jeg.gatewayURL),
 					slog.String("method", method),
@@ -858,7 +858,7 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 				status, hdr, respBody, err := proxySessionToContainerBuffered()
 				if err == nil && status < 400 {
 					writeResponse(status, hdr, respBody)
-					jeg.logger.InfoContext(r.Context(), "access",
+					jeg.logger.InfoContext(r.Context(), "access10",
 						slog.String("user_hash", userHash),
 						slog.String("upstream", microUpstream),
 						slog.String("method", method),
@@ -871,7 +871,7 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 			}
 
 			http.Error(w, "session creation failed", http.StatusBadGateway)
-			jeg.logger.InfoContext(r.Context(), "access",
+			jeg.logger.InfoContext(r.Context(), "access11",
 				slog.String("user_hash", userHash),
 				slog.String("method", method),
 				slog.String("path", r.URL.Path),
@@ -924,7 +924,7 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusOK)
 				_, _ = w.Write(out)
 				log.Printf(`{"msg":"jeg session patch synthesized","user_hash":%q,"session_id":%q,"kernel_id":%q}`, userHash, sessionID, patchKernelID)
-				jeg.logger.InfoContext(r.Context(), "access",
+				jeg.logger.InfoContext(r.Context(), "access12",
 					slog.String("user_hash", userHash),
 					slog.String("upstream", jeg.gatewayURL),
 					slog.String("method", method),
@@ -952,7 +952,7 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusOK)
 					_, _ = w.Write(out)
-					jeg.logger.InfoContext(r.Context(), "access",
+					jeg.logger.InfoContext(r.Context(), "access13",
 						slog.String("user_hash", userHash),
 						slog.String("upstream", "override"),
 						slog.String("method", method),
@@ -971,7 +971,7 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 					// Switching away from JEG — clear override if present.
 					jeg.clearSessionKernelOverride(remoteUser, sessionID)
 					writeResponse(status, hdr, respBody)
-					jeg.logger.InfoContext(r.Context(), "access",
+					jeg.logger.InfoContext(r.Context(), "access14",
 						slog.String("user_hash", userHash),
 						slog.String("upstream", microUpstream),
 						slog.String("method", method),
@@ -1012,7 +1012,7 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 							w.WriteHeader(pStatus)
 							_, _ = w.Write(pBody)
 							log.Printf(`{"msg":"session patch created local session","user_hash":%q,"kernel":%q}`, userHash, patchKernelName)
-							jeg.logger.InfoContext(r.Context(), "access",
+							jeg.logger.InfoContext(r.Context(), "access15",
 								slog.String("user_hash", userHash),
 								slog.String("upstream", microUpstream),
 								slog.String("method", method),
@@ -1027,7 +1027,7 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 			}
 
 			http.Error(w, "session patch failed", http.StatusBadGateway)
-			jeg.logger.InfoContext(r.Context(), "access",
+			jeg.logger.InfoContext(r.Context(), "access16",
 				slog.String("user_hash", userHash),
 				slog.String("method", method),
 				slog.String("path", r.URL.Path),
@@ -1047,7 +1047,7 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 				status, hdr, respBody, err := proxySessionToContainerBuffered()
 				if err == nil && status < 400 {
 					writeResponse(status, hdr, respBody)
-					jeg.logger.InfoContext(r.Context(), "access",
+					jeg.logger.InfoContext(r.Context(), "access17",
 						slog.String("user_hash", userHash),
 						slog.String("upstream", microUpstream),
 						slog.String("method", method),
@@ -1060,7 +1060,7 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 			}
 			// Not in container — 204 regardless (override already cleared).
 			w.WriteHeader(http.StatusNoContent)
-			jeg.logger.InfoContext(r.Context(), "access",
+			jeg.logger.InfoContext(r.Context(), "access18",
 				slog.String("user_hash", userHash),
 				slog.String("method", method),
 				slog.String("path", r.URL.Path),
@@ -1073,7 +1073,7 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 		// Other session methods — proxy to container.
 		if microUpstream == "" {
 			http.Error(w, "workspace not running", http.StatusBadGateway)
-			jeg.logger.InfoContext(r.Context(), "access",
+			jeg.logger.InfoContext(r.Context(), "access19",
 				slog.String("user_hash", userHash),
 				slog.String("method", method),
 				slog.String("path", r.URL.Path),
@@ -1084,7 +1084,7 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		r.Body = io.NopCloser(bytes.NewReader(body))
 		status := proxy.ProxyToContainer(w, r, jegPath, microUpstream, remoteUser)
-		jeg.logger.InfoContext(r.Context(), "access",
+		jeg.logger.InfoContext(r.Context(), "access20",
 			slog.String("user_hash", userHash),
 			slog.String("upstream", microUpstream),
 			slog.String("method", method),
@@ -1099,7 +1099,7 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 	if strings.HasPrefix(jegPath, "/api/contents") {
 		if microUpstream == "" {
 			http.Error(w, "workspace not running", http.StatusBadGateway)
-			jeg.logger.InfoContext(r.Context(), "access",
+			jeg.logger.InfoContext(r.Context(), "access21",
 				slog.String("user_hash", userHash),
 				slog.String("method", method),
 				slog.String("path", r.URL.Path),
@@ -1109,7 +1109,7 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		status := proxy.ProxyToContainer(w, r, jegPath, microUpstream, remoteUser)
-		jeg.logger.InfoContext(r.Context(), "access",
+		jeg.logger.InfoContext(r.Context(), "access22",
 			slog.String("user_hash", userHash),
 			slog.String("upstream", microUpstream),
 			slog.String("method", method),
@@ -1159,7 +1159,7 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 			r.Header.Set("REMOTE_USER", remoteUser)
 			r.Header.Set("remote_user", remoteUser)
 			status := proxy.ProxyWebSocket(w, r, &target)
-			jeg.logger.InfoContext(r.Context(), "access",
+			jeg.logger.InfoContext(r.Context(), "access23",
 				slog.String("user_hash", userHash),
 				slog.String("upstream", jeg.gatewayURL),
 				slog.String("method", method),
@@ -1175,7 +1175,7 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 			containerWS.RawQuery = r.URL.RawQuery
 			r.Header.Set("REMOTE_USER", remoteUser)
 			status := proxy.ProxyWebSocket(w, r, containerWS)
-			jeg.logger.InfoContext(r.Context(), "access",
+			jeg.logger.InfoContext(r.Context(), "access24",
 				slog.String("user_hash", userHash),
 				slog.String("upstream", microUpstream),
 				slog.String("method", method),
@@ -1196,7 +1196,7 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 			r.Header.Set("REMOTE_USER", remoteUser)
 			r.Header.Set("remote_user", remoteUser)
 			status := proxy.ProxyWebSocket(w, r, &target)
-			jeg.logger.InfoContext(r.Context(), "access",
+			jeg.logger.InfoContext(r.Context(), "access26",
 				slog.String("user_hash", userHash),
 				slog.String("upstream", jeg.gatewayURL),
 				slog.String("method", method),
@@ -1287,7 +1287,7 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(result)
 		jeg.logger.InfoContext(
 			r.Context(),
-			"access",
+			"access60",
 			slog.String("user_hash", userHash),
 			slog.String("gateway_url", jeg.gatewayURL),
 			slog.String("method", method),
@@ -1316,7 +1316,7 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 			log.Printf(`{"msg":"local kernel launched","spec":%q,"status":%d}`, launchReq.Name, status)
 			jeg.logger.InfoContext(
 				r.Context(),
-				"access",
+				"access61",
 				slog.String("user_hash", userHash),
 				slog.String("gateway_url", microUpstream),
 				slog.String("method", method),
@@ -1334,7 +1334,7 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"message":"GPU kernel launch requires the Vectis Kernel Panel. Select a kernel type there to launch with billing authorization."}`))
 		jeg.logger.InfoContext(
 			r.Context(),
-			"access",
+			"access62",
 			slog.String("user_hash", userHash),
 			slog.String("gateway_url", jeg.gatewayURL),
 			slog.String("method", method),
@@ -1353,7 +1353,7 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Invalid kernel ID", http.StatusBadRequest)
 			jeg.logger.InfoContext(
 				r.Context(),
-				"access",
+				"access63",
 				slog.String("user_hash", userHash),
 				slog.String("method", method),
 				slog.String("path", r.URL.Path),
@@ -1372,7 +1372,7 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "kernel not found", http.StatusBadGateway)
 				jeg.logger.InfoContext(
 					r.Context(),
-					"access",
+					"access64",
 					slog.String("user_hash", userHash),
 					slog.String("gateway_url", jeg.gatewayURL),
 					slog.String("method", method),
@@ -1389,7 +1389,7 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write(body)
 			jeg.logger.InfoContext(
 				r.Context(),
-				"access",
+				"access65",
 				slog.String("user_hash", userHash),
 				slog.String("gateway_url", jeg.gatewayURL),
 				slog.String("method", method),
@@ -1403,7 +1403,7 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 			status := proxy.ProxyToContainer(w, r, jegPath, microUpstream, remoteUser)
 			jeg.logger.InfoContext(
 				r.Context(),
-				"access",
+				"access66",
 				slog.String("user_hash", userHash),
 				slog.String("gateway_url", microUpstream),
 				slog.String("method", method),
@@ -1422,7 +1422,7 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "kernel not found", http.StatusBadGateway)
 			jeg.logger.InfoContext(
 				r.Context(),
-				"access",
+				"access67",
 				slog.String("user_hash", userHash),
 				slog.String("gateway_url", jeg.gatewayURL),
 				slog.String("method", method),
@@ -1442,7 +1442,7 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(body)
 		jeg.logger.InfoContext(
 			r.Context(),
-			"access",
+			"access68",
 			slog.String("user_hash", userHash),
 			slog.String("gateway_url", jeg.gatewayURL),
 			slog.String("method", method),
@@ -1525,7 +1525,7 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(out)
 		jeg.logger.InfoContext(
 			r.Context(),
-			"access",
+			"access69",
 			slog.String("user_hash", userHash),
 			slog.String("gateway_url", jeg.gatewayURL),
 			slog.String("method", method),
@@ -1544,7 +1544,7 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Invalid kernel ID", http.StatusBadRequest)
 			jeg.logger.InfoContext(
 				r.Context(),
-				"access",
+				"access70",
 				slog.String("user_hash", userHash),
 				slog.String("gateway_url", jeg.gatewayURL),
 				slog.String("method", method),
@@ -1566,7 +1566,7 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "JEG delete failed", status)
 				jeg.logger.InfoContext(
 					r.Context(),
-					"access",
+					"access71",
 					slog.String("user_hash", userHash),
 					slog.String("gateway_url", jeg.gatewayURL),
 					slog.String("method", method),
@@ -1584,7 +1584,7 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 			}
 			jeg.logger.InfoContext(
 				r.Context(),
-				"access",
+				"access72",
 				slog.String("user_hash", userHash),
 				slog.String("gateway_url", jeg.gatewayURL),
 				slog.String("method", method),
@@ -1598,7 +1598,7 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 			status := proxy.ProxyToContainer(w, r, "/api/kernels/"+kernelID, microUpstream, remoteUser)
 			jeg.logger.InfoContext(
 				r.Context(),
-				"access",
+				"access73",
 				slog.String("user_hash", userHash),
 				slog.String("gateway_url", microUpstream),
 				slog.String("method", method),
@@ -1619,7 +1619,7 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "JEG delete failed", status)
 			jeg.logger.InfoContext(
 				r.Context(),
-				"access",
+				"access74",
 				slog.String("user_hash", userHash),
 				slog.String("gateway_url", jeg.gatewayURL),
 				slog.String("method", method),
@@ -1637,7 +1637,7 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		jeg.logger.InfoContext(
 			r.Context(),
-			"access",
+			"access75",
 			slog.String("user_hash", userHash),
 			slog.String("gateway_url", jeg.gatewayURL),
 			slog.String("method", method),
@@ -1659,7 +1659,7 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "workspace not running", http.StatusBadGateway)
 			jeg.logger.InfoContext(
 				r.Context(),
-				"access",
+				"access76",
 				slog.String("user_hash", userHash),
 				slog.String("method", method),
 				slog.String("path", r.URL.Path),
@@ -1671,7 +1671,7 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 		status := proxy.ProxyToContainer(w, r, containerPath, microUpstream, remoteUser)
 		jeg.logger.InfoContext(
 			r.Context(),
-			"access",
+			"access77",
 			slog.String("user_hash", userHash),
 			slog.String("gateway_url", microUpstream),
 			slog.String("method", method),
@@ -1686,7 +1686,7 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, "Not found", http.StatusNotFound)
 	jeg.logger.InfoContext(
 		r.Context(),
-		"access",
+		"access78",
 		slog.String("user_hash", userHash),
 		slog.String("gateway_url", jeg.gatewayURL),
 		slog.String("method", method),
@@ -1799,7 +1799,7 @@ func (jeg *JEG) PanelHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Forbidden", http.StatusForbidden)
 		jeg.logger.InfoContext(
 			r.Context(),
-			"access",
+			"access79",
 			slog.String("user_hash", ""),
 			slog.String("gateway_url", jeg.gatewayURL),
 			slog.String("method", r.Method),
@@ -1837,7 +1837,7 @@ func (jeg *JEG) PanelHandler(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"enabled":true}`))
 		jeg.logger.InfoContext(
 			r.Context(),
-			"access",
+			"access80",
 			slog.String("user_hash", userHash),
 			slog.String("gateway_url", jeg.gatewayURL),
 			slog.String("method", method),
@@ -1858,7 +1858,7 @@ func (jeg *JEG) PanelHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "JEG kernelspecs unavailable", http.StatusBadGateway)
 			jeg.logger.InfoContext(
 				r.Context(),
-				"access",
+				"access81",
 				slog.String("user_hash", userHash),
 				slog.String("gateway_url", jeg.gatewayURL),
 				slog.String("method", method),
@@ -1873,7 +1873,7 @@ func (jeg *JEG) PanelHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "JEG kernelspecs unavailable", resp.StatusCode)
 			jeg.logger.InfoContext(
 				r.Context(),
-				"access",
+				"access82",
 				slog.String("user_hash", userHash),
 				slog.String("gateway_url", jeg.gatewayURL),
 				slog.String("method", method),
@@ -1890,7 +1890,7 @@ func (jeg *JEG) PanelHandler(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(filtered)
 		jeg.logger.InfoContext(
 			r.Context(),
-			"access",
+			"access83",
 			slog.String("user_hash", userHash),
 			slog.String("gateway_url", jeg.gatewayURL),
 			slog.String("method", method),
@@ -1911,7 +1911,7 @@ func (jeg *JEG) PanelHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "JEG kernels unavailable", http.StatusBadGateway)
 			jeg.logger.InfoContext(
 				r.Context(),
-				"access",
+				"access84",
 				slog.String("user_hash", userHash),
 				slog.String("gateway_url", jeg.gatewayURL),
 				slog.String("method", method),
@@ -1928,7 +1928,7 @@ func (jeg *JEG) PanelHandler(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(body)
 		jeg.logger.InfoContext(
 			r.Context(),
-			"access",
+			"access85",
 			slog.String("user_hash", userHash),
 			slog.String("gateway_url", jeg.gatewayURL),
 			slog.String("method", method),
@@ -1953,7 +1953,7 @@ func (jeg *JEG) PanelHandler(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write([]byte(`{"message":"Invalid kernel launch request — name is required."}`))
 			jeg.logger.InfoContext(
 				r.Context(),
-				"access",
+				"access86",
 				slog.String("user_hash", userHash),
 				slog.String("gateway_url", jeg.gatewayURL),
 				slog.String("method", method),
@@ -1980,7 +1980,7 @@ func (jeg *JEG) PanelHandler(w http.ResponseWriter, r *http.Request) {
 				log.Printf(`{"msg":"panel kernel launch blocked — spec not in allowedSpecs","user_hash":%q,"spec":%q}`, userHash, launchReq.Name)
 				jeg.logger.InfoContext(
 					r.Context(),
-					"access",
+					"access87",
 					slog.String("user_hash", userHash),
 					slog.String("gateway_url", jeg.gatewayURL),
 					slog.String("method", method),
@@ -2019,7 +2019,7 @@ func (jeg *JEG) PanelHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "JEG kernel launch failed", http.StatusBadGateway)
 			jeg.logger.InfoContext(
 				r.Context(),
-				"access",
+				"access88",
 				slog.String("user_hash", userHash),
 				slog.String("gateway_url", jeg.gatewayURL),
 				slog.String("method", method),
@@ -2040,7 +2040,7 @@ func (jeg *JEG) PanelHandler(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(respBody)
 		jeg.logger.InfoContext(
 			r.Context(),
-			"access",
+			"access89",
 			slog.String("user_hash", userHash),
 			slog.String("gateway_url", jeg.gatewayURL),
 			slog.String("method", method),
@@ -2059,7 +2059,7 @@ func (jeg *JEG) PanelHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Invalid kernel ID", http.StatusBadRequest)
 			jeg.logger.InfoContext(
 				r.Context(),
-				"access",
+				"access90",
 				slog.String("user_hash", userHash),
 				slog.String("gateway_url", jeg.gatewayURL),
 				slog.String("method", method),
@@ -2077,7 +2077,7 @@ func (jeg *JEG) PanelHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "JEG delete failed", http.StatusBadGateway)
 			jeg.logger.InfoContext(
 				r.Context(),
-				"access",
+				"access92",
 				slog.String("user_hash", userHash),
 				slog.String("gateway_url", jeg.gatewayURL),
 				slog.String("method", method),
@@ -2095,7 +2095,7 @@ func (jeg *JEG) PanelHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		jeg.logger.InfoContext(
 			r.Context(),
-			"access",
+			"access95",
 			slog.String("user_hash", userHash),
 			slog.String("gateway_url", jeg.gatewayURL),
 			slog.String("method", method),
@@ -2109,7 +2109,7 @@ func (jeg *JEG) PanelHandler(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, "Not found", http.StatusNotFound)
 	jeg.logger.InfoContext(
 		r.Context(),
-		"access",
+		"access93",
 		slog.String("user_hash", userHash),
 		slog.String("gateway_url", jeg.gatewayURL),
 		slog.String("method", method),

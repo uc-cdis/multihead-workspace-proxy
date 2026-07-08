@@ -420,7 +420,7 @@ func (server *HTTPServer) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if remoteUser == "" {
 		http.Error(w, "Forbidden", http.StatusForbidden)
-		server.logger.WarnContext(r.Context(), "access",
+		server.logger.WarnContext(r.Context(), "access27",
 			slog.String("user_hash", ""),
 			slog.String("upstream", ""),
 			slog.String("method", r.Method),
@@ -456,7 +456,7 @@ func (server *HTTPServer) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 			time.Now().UTC().Format(time.RFC3339), remoteUserRaw, identityRaw, remoteUser, uidCandidate, err.Error())
 		http.Error(w, "Bad Gateway: workspace not running", http.StatusBadGateway)
 
-		server.logger.ErrorContext(r.Context(), "access",
+		server.logger.ErrorContext(r.Context(), "access28",
 			slog.String("user_hash", userHash),
 			slog.String("upstream", ""),
 			slog.String("method", r.Method),
@@ -475,7 +475,7 @@ func (server *HTTPServer) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 	if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
 		status := proxy.ProxyWebSocket(w, r, target)
 		fmt.Print(status)
-		server.logger.InfoContext(r.Context(), "access",
+		server.logger.InfoContext(r.Context(), "access29",
 			slog.String("user_hash", userHash),
 			slog.String("upstream", upstreamStr),
 			slog.String("method", r.Method),
@@ -508,7 +508,7 @@ func (server *HTTPServer) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 		upstreamCache.Delete(remoteUser)
 		evictSvcListCache()
 		http.Error(w, "Bad Gateway: workspace unavailable", http.StatusBadGateway)
-		server.logger.ErrorContext(r.Context(), "access",
+		server.logger.ErrorContext(r.Context(), "access30",
 			slog.String("user_hash", userHash),
 			slog.String("upstream", upstreamStr),
 			slog.String("method", r.Method),
@@ -517,7 +517,7 @@ func (server *HTTPServer) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 		)
 	}
 	proxy.ServeHTTP(sr, r)
-	server.logger.InfoContext(r.Context(), "access",
+	server.logger.InfoContext(r.Context(), "access31",
 		slog.String("user_hash", userHash),
 		slog.String("upstream", upstreamStr),
 		slog.String("method", r.Method),

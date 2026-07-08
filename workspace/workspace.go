@@ -348,7 +348,10 @@ func resolveUpstream(ctx context.Context, k8s *kubernetes.Client, serviceName st
 		return fmt.Sprintf("http://%s.%s.svc.cluster.local:80", serviceName, workspaceNS), nil
 	}
 
-	service, _ := k8s.GetWorkspaceService(ctx, serviceName)
+	service, err := k8s.GetWorkspaceService(ctx, serviceName)
+	if err != nil {
+		log.Printf("!!!3d %+v", err)
+	}
 
 	return fmt.Sprintf("http://%s.%s.svc.cluster.local:%d", service.Name, service.Namespace, service.Port), nil
 }

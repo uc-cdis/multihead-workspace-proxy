@@ -491,17 +491,39 @@ func (server *HTTPServer) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 	sr := &proxy.StatusRecorder{ResponseWriter: w, Status: http.StatusOK}
 	proxy := &httputil.ReverseProxy{
 		Director: func(req *http.Request) {
+			log.Printf("&0 incoming scheme=%q host=%q path=%q rawPath=%q req.Host=%q",
+				req.URL.Scheme,
+				req.URL.Host,
+				req.URL.Path,
+				req.URL.RawPath,
+				req.Host,
+			)
+
 			req.URL.Scheme = target.Scheme
+			log.Printf("&1 req.URL.Scheme=%q", req.URL.Scheme)
+
 			req.URL.Host = target.Host
+			log.Printf("&2 req.URL.Host=%q", req.URL.Host)
+
 			req.Host = target.Host
+			log.Printf("&3 req.Host=%q", req.Host)
+
 			// Restore prefix: nginx strips it, Jupyter expects it as its base URL.
 			req.URL.Path = ensureUpstreamPrefix(req.URL.Path)
+			log.Printf("&4 req.URL.Path=%q", req.URL.Path)
+
 			if req.URL.RawPath != "" {
 				req.URL.RawPath = ensureUpstreamPrefix(req.URL.RawPath)
+				log.Printf("&5 req.URL.RawPath=%q", req.URL.RawPath)
+			} else {
+				log.Printf("&5 req.URL.RawPath=%q (unchanged)", req.URL.RawPath)
 			}
 		},
 		FlushInterval: 100 * time.Millisecond,
 	}
+
+	log.Printf("&6 proxy.FlushInterval=%v", proxy.FlushInterval)
+
 	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
 		// Evict both caches so the next request re-queries K8s — pod may have restarted,
 		// moved to a different node, or been replaced with a different port.

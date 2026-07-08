@@ -518,6 +518,15 @@ func (server *HTTPServer) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 			} else {
 				log.Printf("&5 req.URL.RawPath=%q (unchanged)", req.URL.RawPath)
 			}
+			server.logger.InfoContext(req.Context(), "proxy outbound",
+				slog.String("method", req.Method),
+				slog.String("url", req.URL.String()),
+				slog.String("scheme", req.URL.Scheme),
+				slog.String("host", req.URL.Host),
+				slog.String("path", req.URL.Path),
+				slog.String("raw_path", req.URL.RawPath),
+				slog.String("request_host", req.Host),
+			)
 		},
 		FlushInterval: 100 * time.Millisecond,
 	}

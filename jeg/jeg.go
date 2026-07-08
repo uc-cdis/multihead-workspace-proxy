@@ -10,6 +10,7 @@ import (
 	"log"
 	"log/slog"
 	"net/http"
+	"net/http/httputil"
 	"net/url"
 	"strings"
 	"sync"
@@ -612,6 +613,14 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 				req.URL.RawQuery = r.URL.RawQuery
 				log.Printf("&12 rawQuery=%q", r.URL.RawQuery)
 			}
+
+			dump, err := httputil.DumpRequestOut(req, true)
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			fmt.Printf("&77 %s\n", dump)
+
 			resp, err := http.DefaultClient.Do(req)
 			log.Printf("&13 err=%v", err)
 			if err != nil {

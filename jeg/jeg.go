@@ -768,6 +768,10 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 				localSpec = isLocalContainerSpec(microUpstream, postKernelName, remoteUser)
 			}
 
+			log.Printf("&1 localSpec=%+v", localSpec)
+			log.Printf("&2 microUpstream=%+v", microUpstream)
+			log.Printf("&3 postKernelName=%+v", postKernelName)
+
 			// Local kernel — forward to container.
 			if localSpec {
 				if microUpstream != "" {

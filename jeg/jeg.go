@@ -583,28 +583,45 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 		_ = r.Body.Close()
 
 		proxySessionToContainerBuffered := func() (int, http.Header, []byte, error) {
+			log.Printf("&1 microUpstream=%q", microUpstream)
 			if microUpstream == "" {
 				return http.StatusBadGateway, nil, nil, fmt.Errorf("workspace not running")
 			}
 			upstream := strings.TrimRight(microUpstream, "/") + proxy.UpstreamPrefix + jegPath
+			log.Printf("&2 upstream=%q", upstream)
+			log.Printf("&3 method=%q", method)
+			log.Printf("&4 jegPath=%q", jegPath)
+			log.Printf("&5 proxy.UpstreamPrefix=%q", proxy.UpstreamPrefix)
+			log.Printf("&6 body_len=%d", len(body))
 			req, _ := http.NewRequest(method, upstream, bytes.NewReader(body))
+			log.Printf("&7 req.URL=%q", req.URL.String())
 			for key := range r.Header {
+				log.Printf("&8 header_key=%q", key)
+
 				switch strings.ToLower(key) {
 				case "connection", "upgrade", "te", "trailers", "transfer-encoding":
+					log.Printf("&9 skipped_header=%q", key)
 					continue
 				}
 				req.Header[key] = r.Header[key]
+				log.Printf("&10 copied_header=%q value=%q", key, req.Header[key])
 			}
 			req.Header.Set("REMOTE_USER", remoteUser)
+			log.Printf("&11 remoteUser=%q", remoteUser)
 			if r.URL.RawQuery != "" {
 				req.URL.RawQuery = r.URL.RawQuery
+				log.Printf("&12 rawQuery=%q", r.URL.RawQuery)
 			}
 			resp, err := http.DefaultClient.Do(req)
+			log.Printf("&13 err=%v", err)
 			if err != nil {
 				return http.StatusBadGateway, nil, nil, err
 			}
 			defer resp.Body.Close()
+			log.Printf("&14 statusCode=%d", resp.StatusCode)
+			log.Printf("&15 responseHeaders=%v", resp.Header)
 			respBody, _ := io.ReadAll(resp.Body)
+			log.Printf("&16 respBodyLen=%d", len(respBody))
 			return resp.StatusCode, resp.Header, respBody, nil
 		}
 

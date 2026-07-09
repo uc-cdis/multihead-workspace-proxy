@@ -109,7 +109,14 @@ func main() {
 	slog.SetDefault(logger)
 
 	cfg := config.Load()
-	k8s := kubernetes.New(cfg.WorkspaceNamespace)
+	k8s, err := kubernetes.New(cfg.WorkspaceNamespace)
+	if errors.Is(err, kubernetes.ErrNotInCluster) {
+		slog.Warn(`{"msg":"no SA token — falling back to plain DNS (not in-cluster?)"}`)
+		k8s = nil
+	} else if err != nil {
+		slog.Error("failed to create k8s client: %v", slog.Any("error", err))
+		os.Exit(1)
+	}
 	jeg := jeg.New(logger, k8s, cfg.JEG.GatewayURL, cfg.JEG.KernelSpecPolicy)
 	proxy := workspace.NewHTTPClientProxy(logger, k8s)
 
@@ -153,5 +160,5 @@ func main() {
 }
 
 func isDebugHeaderSet(r *http.Request) bool {
-	return r.Header.Get("X-DEBUG") == "reveal-the-logs"
+	return r.Header.Get("X-DEBUG") == "reveal-thy-logs"
 }

@@ -5,10 +5,13 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"log"
+	"io"
 	"net/http"
+	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -50,18 +53,50 @@ type K8sService struct {
 	Annotations map[string]string
 }
 
-func (k8s *Client) ListWorkspaceServices(ctx context.Context) ([]K8sService, error) {
-	token, err := k8s.bearerToken()
-	if err != nil {
-		return nil, fmt.Errorf("sa token unavailable: %w", err)
+type k8sServiceListResponse struct {
+	Metadata struct {
+		Continue string `json:"continue"`
+	} `json:"metadata"`
+
+	Items []k8sServiceItem `json:"items"`
+}
+
+type k8sServiceItem struct {
+	Metadata struct {
+		Name        string            `json:"name"`
+		Annotations map[string]string `json:"annotations"`
+	} `json:"metadata"`
+
+	Spec struct {
+		Ports []struct {
+			Port int32 `json:"port"`
+		} `json:"ports"`
+	} `json:"spec"`
+}
+
+func serviceFromK8sItem(item k8sServiceItem, namespace string) K8sService {
+	var port int32
+	if len(item.Spec.Ports) > 0 {
+		port = item.Spec.Ports[0].Port
 	}
 
-	apiURL := fmt.Sprintf("%s/api/v1/namespaces/%s/services", k8s.apiBase, k8s.namespace)
-	log.Printf("%+v", apiURL)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
-	log.Printf("%+v", req)
+	return K8sService{
+		Name:        item.Metadata.Name,
+		Port:        port,
+		Namespace:   namespace,
+		Annotations: item.Metadata.Annotations,
+	}
+}
+
+func (k8s *Client) getJSON(ctx context.Context, apiURL string, out any) (*http.Response, error) {
+	token, err := k8s.bearerToken()
 	if err != nil {
-		return nil, fmt.Errorf("create Kubernetes services request: %w", err)
+		return nil, fmt.Errorf("service account token unavailable: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, http.NoBody)
+	if err != nil {
+		return nil, fmt.Errorf("create Kubernetes request: %w", err)
 	}
 
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -69,126 +104,109 @@ func (k8s *Client) ListWorkspaceServices(ctx context.Context) ([]K8sService, err
 
 	resp, err := k8s.http.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("k8s API unreachable: %w", err)
+		return nil, fmt.Errorf("call Kubernetes API: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("k8s API returned HTTP %d while listing services", resp.StatusCode)
+		return resp, k8sAPIStatusError(resp)
 	}
 
-	var raw struct {
-		Items []struct {
-			Metadata struct {
-				Name        string            `json:"name"`
-				Annotations map[string]string `json:"annotations"`
-			} `json:"metadata"`
-			Spec struct {
-				Ports []struct {
-					Port int32 `json:"port"`
-				} `json:"ports"`
-			} `json:"spec"`
-		} `json:"items"`
+	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+		return resp, fmt.Errorf("decode Kubernetes response: %w", err)
 	}
 
-	log.Printf("%+v", resp.Body)
+	return resp, nil
+}
 
-	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
-		return nil, fmt.Errorf("decode Kubernetes services response: %w", err)
+func k8sAPIStatusError(resp *http.Response) error {
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+
+	return fmt.Errorf(
+		"k8s API returned %s: %s",
+		resp.Status,
+		strings.TrimSpace(string(body)),
+	)
+}
+
+func (k8s *Client) ListWorkspaceServices(ctx context.Context) ([]K8sService, error) {
+	const pageLimit = 500
+
+	baseURL, err := url.JoinPath(
+		k8s.apiBase,
+		"api",
+		"v1",
+		"namespaces",
+		k8s.namespace,
+		"services",
+	)
+	if err != nil {
+		return nil, fmt.Errorf("build Kubernetes services URL: %w", err)
 	}
 
-	log.Printf("%+v", raw)
+	services := make([]K8sService, 0)
+	continueToken := ""
 
-	services := make([]K8sService, 0, len(raw.Items))
-	for _, item := range raw.Items {
-		var port int32
-		if len(item.Spec.Ports) > 0 {
-			port = item.Spec.Ports[0].Port
+	for {
+		pageURL, err := url.Parse(baseURL)
+		if err != nil {
+			return nil, fmt.Errorf("parse Kubernetes services URL: %w", err)
 		}
 
-		services = append(services, K8sService{
-			Name:        item.Metadata.Name,
-			Port:        port,
-			Namespace:   k8s.namespace,
-			Annotations: item.Metadata.Annotations,
-		})
-	}
+		query := pageURL.Query()
+		query.Set("limit", strconv.Itoa(pageLimit))
+		if continueToken != "" {
+			query.Set("continue", continueToken)
+		}
+		pageURL.RawQuery = query.Encode()
 
-	log.Printf("%+v", services)
+		var raw k8sServiceListResponse
+		if _, err := k8s.getJSON(ctx, pageURL.String(), &raw); err != nil {
+			return nil, fmt.Errorf("list Kubernetes services: %w", err)
+		}
+
+		for _, item := range raw.Items {
+			services = append(services, serviceFromK8sItem(item, k8s.namespace))
+		}
+
+		if raw.Metadata.Continue == "" {
+			break
+		}
+		continueToken = raw.Metadata.Continue
+	}
 
 	return services, nil
 }
 
 func (k8s *Client) GetWorkspaceService(ctx context.Context, name string) (K8sService, error) {
-	token, err := k8s.bearerToken()
-	if err != nil {
-		return K8sService{}, fmt.Errorf("sa token unavailable: %w", err)
+	if strings.TrimSpace(name) == "" {
+		return K8sService{}, fmt.Errorf("workspace service name is required")
 	}
 
-	log.Printf("!!!4%+v", name)
-
-	apiURL := fmt.Sprintf(
-		"%s/api/v1/namespaces/%s/services/%s",
+	apiURL, err := url.JoinPath(
 		k8s.apiBase,
+		"api",
+		"v1",
+		"namespaces",
 		k8s.namespace,
+		"services",
 		name,
 	)
-
-	log.Printf("!!!zzz %+v", apiURL)
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
 	if err != nil {
-		return K8sService{}, fmt.Errorf("create Kubernetes service request: %w", err)
+		return K8sService{}, fmt.Errorf("build Kubernetes service URL: %w", err)
 	}
 
-	log.Printf("!!!5%+v", name)
-
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := k8s.http.Do(req)
+	var raw k8sServiceItem
+	resp, err := k8s.getJSON(ctx, apiURL, &raw)
 	if err != nil {
-		return K8sService{}, fmt.Errorf("k8s API unreachable: %w", err)
-	}
-	defer resp.Body.Close()
+		if resp != nil && resp.StatusCode == http.StatusNotFound {
+			return K8sService{}, fmt.Errorf("workspace service %q not found", name)
+		}
 
-	if resp.StatusCode == http.StatusNotFound {
-		return K8sService{}, fmt.Errorf("workspace service %q not found — pod not running", name)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return K8sService{}, fmt.Errorf("k8s API returned HTTP %d for service %q", resp.StatusCode, name)
+		return K8sService{}, fmt.Errorf("get Kubernetes service %q: %w", name, err)
 	}
 
-	var raw struct {
-		Metadata struct {
-			Name        string            `json:"name"`
-			Annotations map[string]string `json:"annotations"`
-		} `json:"metadata"`
-		Spec struct {
-			Ports []struct {
-				Port int32 `json:"port"`
-			} `json:"ports"`
-		} `json:"spec"`
-	}
-
-	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
-		log.Printf("!!!xxx %+v", err)
-		return K8sService{}, fmt.Errorf("decode Kubernetes service response: %w", err)
-	}
-
-	log.Printf("!!!9%+v", raw)
-
-	var port int32
-	if len(raw.Spec.Ports) > 0 {
-		port = raw.Spec.Ports[0].Port
-	}
-
-	return K8sService{
-		Name:        raw.Metadata.Name,
-		Port:        port,
-		Namespace:   k8s.namespace,
-		Annotations: raw.Metadata.Annotations,
-	}, nil
+	return serviceFromK8sItem(raw, k8s.namespace), nil
 }
 
 // BearerToken reads the current service account token from disk.
@@ -197,31 +215,53 @@ func (k8s *Client) GetWorkspaceService(ctx context.Context, name string) (K8sSer
 func (c *Client) bearerToken() (string, error) {
 	b, err := os.ReadFile(c.tokenPath)
 	if err != nil {
-		return "", fmt.Errorf("reading SA token: %w", err)
+		return "", fmt.Errorf("read service account token from %q: %w", c.tokenPath, err)
 	}
-	return strings.TrimSpace(string(b)), nil
+	token := strings.TrimRight(string(b), "\r\n")
+	if token == "" {
+		return "", fmt.Errorf("service account token file %q is empty", c.tokenPath)
+	}
+	return token, nil
 }
 
-func New(namespace string) *Client {
-	// Verify the token file exists at startup so we can log clearly if not in-cluster.
-	if _, err := os.ReadFile(tokenPath); err != nil {
-		log.Printf(`{"msg":"no SA token — falling back to plain DNS (not in-cluster?)","detail":%q}`, err.Error())
-		return nil
+var ErrNotInCluster = errors.New("not running in-cluster")
+
+func New(namespace string) (*Client, error) {
+	// Check presence only; bearerToken reads the file later so rotated tokens are picked up.
+	if _, err := os.Stat(tokenPath); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, ErrNotInCluster
+		}
+		return nil, fmt.Errorf("checking service account token at %q: %w", tokenPath, err)
 	}
-	tlsCfg := &tls.Config{}
-	if caBytes, err := os.ReadFile(caPath); err == nil {
+
+	var tlsCfg *tls.Config
+
+	caBytes, err := os.ReadFile(caPath)
+	if err == nil {
 		pool := x509.NewCertPool()
-		pool.AppendCertsFromPEM(caBytes)
-		tlsCfg.RootCAs = pool
+		if !pool.AppendCertsFromPEM(caBytes) {
+			return nil, fmt.Errorf("parsing Kubernetes CA cert at %q: no PEM certificates found", caPath)
+		}
+
+		tlsCfg = &tls.Config{
+			RootCAs:    pool,
+			MinVersion: tls.VersionTLS12,
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("reading Kubernetes CA cert at %q: %w", caPath, err)
 	}
+
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.TLSClientConfig = tlsCfg
 
 	return &Client{
 		http: &http.Client{
-			Transport: &http.Transport{TLSClientConfig: tlsCfg},
+			Transport: transport,
 			Timeout:   5 * time.Second,
 		},
 		tokenPath: tokenPath,
 		apiBase:   apiBase,
 		namespace: namespace,
-	}
+	}, nil
 }

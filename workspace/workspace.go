@@ -38,7 +38,7 @@ func escapism(input string) string {
 		if strings.ContainsRune(safe, ch) {
 			sb.WriteRune(ch)
 		} else {
-			sb.WriteString(fmt.Sprintf("-%2x", ch))
+			fmt.Fprintf(&sb, "-%2x", ch)
 		}
 	}
 	return sb.String()
@@ -170,11 +170,6 @@ type upstreamEntry struct {
 // TTL is 30s — short enough to pick up pod-restart port changes, long enough
 // to avoid K8s API calls on every WebSocket frame heartbeat.
 var upstreamCache sync.Map // map[string]*upstreamEntry
-type svcListItem struct {
-	Name        string
-	Annotations map[string]string
-	Ports       []int32
-}
 
 type svcListCacheEntry struct {
 	items   []kubernetes.K8sService

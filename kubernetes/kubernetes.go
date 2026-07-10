@@ -122,24 +122,13 @@ func (k8s *Client) getJSON(ctx context.Context, apiURL string, out any) (*http.R
 func k8sAPIStatusError(resp *http.Response) error {
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
 
-	return fmt.Errorf(
-		"k8s API returned %s: %s",
-		resp.Status,
-		strings.TrimSpace(string(body)),
-	)
+	return fmt.Errorf("k8s API returned %s: %s", resp.Status, strings.TrimSpace(string(body)))
 }
 
 func (k8s *Client) ListWorkspaceServices(ctx context.Context) ([]K8sService, error) {
 	const pageLimit = 500
 
-	baseURL, err := url.JoinPath(
-		k8s.apiBase,
-		"api",
-		"v1",
-		"namespaces",
-		k8s.namespace,
-		"services",
-	)
+	baseURL, err := url.JoinPath(k8s.apiBase, "api", "v1", "namespaces", k8s.namespace, "services")
 	if err != nil {
 		return nil, fmt.Errorf("build Kubernetes services URL: %w", err)
 	}
@@ -183,15 +172,7 @@ func (k8s *Client) GetWorkspaceService(ctx context.Context, name string) (K8sSer
 		return K8sService{}, fmt.Errorf("workspace service name is required")
 	}
 
-	apiURL, err := url.JoinPath(
-		k8s.apiBase,
-		"api",
-		"v1",
-		"namespaces",
-		k8s.namespace,
-		"services",
-		name,
-	)
+	apiURL, err := url.JoinPath(k8s.apiBase, "api", "v1", "namespaces", k8s.namespace, "services", name)
 	if err != nil {
 		return K8sService{}, fmt.Errorf("build Kubernetes service URL: %w", err)
 	}

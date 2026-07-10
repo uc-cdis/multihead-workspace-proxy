@@ -8,6 +8,7 @@ ENV appname=multihead-workspace-proxy
 ENV CGO_ENABLED=0
 ENV GOOS=${TARGETOS}
 ENV GOARCH=${TARGETARCH}
+ENV GOTOOLCHAIN=go1.26.5
 
 FROM base AS builder
 WORKDIR $GOPATH/src/github.com/uc-cdis/multihead-workspace-proxy/

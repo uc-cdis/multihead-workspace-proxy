@@ -26,10 +26,13 @@ RUN GITCOMMIT=$(git rev-parse HEAD) \
 
 RUN echo "nobody:x:65534:65534:Nobody:/:" > /etc_passwd
 
-FROM scratch
+# FROM scratch
+
+FROM amazonlinux:2023
+
 COPY --from=builder /etc_passwd /etc/passwd
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=builder /multihead-workspace-proxy /multihead-workspace-proxy
-USER nobody
+# USER nobody
 ENTRYPOINT ["/multihead-workspace-proxy"]
 CMD ["/multihead-workspace-proxy"]

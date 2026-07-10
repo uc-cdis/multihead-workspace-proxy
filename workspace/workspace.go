@@ -528,6 +528,19 @@ func (server *HTTPServer) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("&6 proxy.FlushInterval=%v", proxy.FlushInterval)
 
+	proxy.ModifyResponse = func(resp *http.Response) error {
+		server.logger.InfoContext(resp.Request.Context(), "proxy upstream response",
+			slog.Int("status", resp.StatusCode),
+			slog.String("status_text", resp.Status),
+			slog.String("url", resp.Request.URL.String()),
+			slog.String("content_type", resp.Header.Get("Content-Type")),
+			slog.Int64("content_length", resp.ContentLength),
+		)
+
+		// Returning a non-nil error here deliberately invokes ErrorHandler.
+		return nil
+	}
+
 	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
 		// Evict both caches so the next request re-queries K8s — pod may have restarted,
 		// moved to a different node, or been replaced with a different port.

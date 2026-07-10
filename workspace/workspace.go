@@ -540,6 +540,7 @@ func (server *HTTPServer) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 			slog.String("method", r.Method),
 			slog.String("path", r.URL.Path),
 			slog.Int("status", http.StatusBadGateway),
+			slog.Any("error", err),
 		)
 	}
 	proxy.ServeHTTP(sr, r)

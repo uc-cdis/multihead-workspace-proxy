@@ -2,7 +2,6 @@ package workspace
 
 import (
 	"context"
-	"crypto/sha256"
 	"fmt"
 	"log"
 	"log/slog"
@@ -14,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/uc-cdis/workspace-proxy/internal/identity"
 	"github.com/uc-cdis/workspace-proxy/kubernetes"
 	"github.com/uc-cdis/workspace-proxy/proxy"
 )
@@ -40,41 +40,6 @@ func userToServiceName(username string) string {
 	return fmt.Sprintf("h-%s-s", escapism(username))
 }
 
-// HashUser returns a truncated SHA-256 hex digest of the username for PII-safe logging.
-func HashUser(username string) string {
-	sum := sha256.Sum256([]byte(username))
-	return fmt.Sprintf("%x", sum[:8])
-}
-
-// NormalizeRemoteUser converts Gen3 authz REMOTE_USER formats into a plain username.
-// Example: "uid:4,test" -> "test".
-func NormalizeRemoteUser(remoteUser string) string {
-	v := strings.TrimSpace(remoteUser)
-	if strings.HasPrefix(v, "uid:") {
-		parts := strings.SplitN(v, ",", 2)
-		if len(parts) == 2 {
-			if username := strings.TrimSpace(parts[1]); username != "" {
-				return username
-			}
-		}
-	}
-	return v
-}
-
-// ParseRemoteUserID extracts the numeric uid from REMOTE_USER formats like "uid:4,test".
-func ParseRemoteUserID(remoteUser string) string {
-	v := strings.TrimSpace(remoteUser)
-	if !strings.HasPrefix(v, "uid:") {
-		return ""
-	}
-	v = strings.TrimPrefix(v, "uid:")
-	parts := strings.SplitN(v, ",", 2)
-	if len(parts) == 0 {
-		return ""
-	}
-	return strings.TrimSpace(parts[0])
-}
-
 // parseAmbassadorRemoteUserField scans Hatchery's getambassador.io/config YAML blob
 // for the "remote_user:" line inside headers and returns the value.
 func parseAmbassadorRemoteUserField(annotYAML string) string {
@@ -92,16 +57,18 @@ func parseAmbassadorRemoteUserField(annotYAML string) string {
 	return ""
 }
 
-func annotationRemoteUserMatches(annotationRemoteUser, normalizedUser, identityRaw, remoteUserHeader string) bool {
+func annotationRemoteUserMatches(annotationRemoteUser string, id identity.Identity) bool {
 	annot := strings.TrimSpace(annotationRemoteUser)
 	if annot == "" {
 		return false
 	}
 
 	candidates := []string{
-		strings.TrimSpace(normalizedUser),
-		strings.TrimSpace(identityRaw),
-		strings.TrimSpace(remoteUserHeader),
+		strings.TrimSpace(id.Username),
+		strings.TrimSpace(id.UID),
+	}
+	if id.UID != "" {
+		candidates = append(candidates, fmt.Sprintf("uid:%s,%s", id.UID, id.Username))
 	}
 
 	for _, c := range candidates {
@@ -113,15 +80,8 @@ func annotationRemoteUserMatches(annotationRemoteUser, normalizedUser, identityR
 		}
 	}
 
-	uid := ParseRemoteUserID(identityRaw)
-	if uid == "" {
-		uid = ParseRemoteUserID(remoteUserHeader)
-	}
-	if uid != "" {
-		if annot == uid || strings.EqualFold(annot, uid) {
-			return true
-		}
-		uidCandidate := fmt.Sprintf("%s, %s", uid, uid)
+	if id.UID != "" {
+		uidCandidate := fmt.Sprintf("%s, %s", id.UID, id.UID)
 		if annot == uidCandidate || strings.EqualFold(annot, uidCandidate) {
 			return true
 		}
@@ -226,7 +186,7 @@ func lookupUpstream(ctx context.Context, k8s *kubernetes.Client, namespace, user
 // K8s API once per request, which at scale is an accidental DoS on the control plane.
 // We cache the list for svcListCacheTTL and forcibly evict it in proxy.ErrorHandler
 // so pod restarts are picked up promptly.
-func lookupByAnnotationRemoteUser(k8s *kubernetes.Client, username, identityRaw, remoteUserHeader string) (string, error) {
+func lookupByAnnotationRemoteUser(k8s *kubernetes.Client, id identity.Identity) (string, error) {
 	if k8s == nil {
 		return "", fmt.Errorf("k8s discovery unavailable")
 	}
@@ -260,7 +220,7 @@ func lookupByAnnotationRemoteUser(k8s *kubernetes.Client, username, identityRaw,
 		}
 
 		annotationRemoteUser := parseAmbassadorRemoteUserField(annotYAML)
-		if !annotationRemoteUserMatches(annotationRemoteUser, username, identityRaw, remoteUserHeader) {
+		if !annotationRemoteUserMatches(annotationRemoteUser, id) {
 			continue
 		}
 
@@ -275,47 +235,38 @@ func lookupByAnnotationRemoteUser(k8s *kubernetes.Client, username, identityRaw,
 		return soleAnnotatedUpstream, nil
 	}
 
-	return "", fmt.Errorf("no service annotation matched remote_user for %q", username)
+	return "", fmt.Errorf("no service annotation matched remote_user for %q", id.Username)
 }
 
-func LookupUpstreamWithFallback(ctx context.Context, k8s *kubernetes.Client, namespace, username, identityRaw, remoteUserHeader string) (string, error) {
-	upstream, err := lookupUpstream(ctx, k8s, namespace, username)
+func LookupUpstreamWithFallback(ctx context.Context, k8s *kubernetes.Client, namespace string, id identity.Identity) (string, error) {
+	upstream, err := lookupUpstream(ctx, k8s, namespace, id.Username)
 	if err == nil {
 		return upstream, nil
 	}
 
-	log.Printf("\t%+v\n", username)
-	log.Printf("\t%+v\n", identityRaw)
-	log.Printf("\t%+v\n", remoteUserHeader)
-
-	uid := ParseRemoteUserID(identityRaw)
-	if uid == "" {
-		uid = ParseRemoteUserID(remoteUserHeader)
+	if id.UID == "" {
+		return lookupByAnnotationRemoteUser(k8s, id)
 	}
-	if uid == "" {
-		return lookupByAnnotationRemoteUser(k8s, username, identityRaw, remoteUserHeader)
-	}
-	log.Printf("\t%+v\n", uid)
 	// Hatchery can derive service names from "<uid>, <uid>" (e.g. "4, 4" -> h-4-2c-204-s).
-	uidHatcheryUser := fmt.Sprintf("%s, %s", uid, uid)
+	uidHatcheryUser := fmt.Sprintf("%s, %s", id.UID, id.UID)
 	upstreamByUID, uidErr := lookupUpstream(ctx, k8s, namespace, uidHatcheryUser)
 
 	log.Printf("\t%+v\n", uidHatcheryUser)
 	log.Printf("\t%+v\n", upstreamByUID)
 	if uidErr != nil {
-		annotationUpstream, annotErr := lookupByAnnotationRemoteUser(k8s, username, identityRaw, remoteUserHeader)
+		annotationUpstream, annotErr := lookupByAnnotationRemoteUser(k8s, id)
 		if annotErr != nil {
 			return "", err
 		}
 
-		upstreamCache.Store(username, &upstreamEntry{
+		upstreamCache.Store(id.Username, &upstreamEntry{
 			upstream: annotationUpstream,
 			expires:  time.Now().Add(upstreamCacheTTL),
 		})
 		return annotationUpstream, nil
 	}
 
-	upstreamCache.Store(username, &upstreamEntry{
+	upstreamCache.Store(id.Username, &upstreamEntry{
 		upstream: upstreamByUID,
 		expires:  time.Now().Add(upstreamCacheTTL),
 	})
@@ -393,19 +344,8 @@ func NewHTTPClientProxy(logger *slog.Logger, k8s *kubernetes.Client, namespace s
 
 func (server *HTTPServer) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-
-	// Enforce authentication: REMOTE_USER must be set by revproxy auth_request.
-	// Clients cannot forge it — revproxy strips any client-supplied REMOTE_USER.
-	remoteUserRaw := strings.TrimSpace(r.Header.Get("REMOTE_USER"))
-	identityRaw := strings.TrimSpace(r.Header.Get("X-Gen3-User-ID"))
-	if identityRaw == "" {
-		identityRaw = remoteUserRaw
-	}
-	remoteUser := NormalizeRemoteUser(identityRaw)
-	if remoteUser == "" {
-		remoteUser = NormalizeRemoteUser(remoteUserRaw)
-	}
-	if remoteUser == "" {
+	id, ok := identity.FromContext(ctx)
+	if !ok {
 		http.Error(w, "Forbidden", http.StatusForbidden)
 		server.logger.WarnContext(r.Context(), "access27",
 			slog.String("user_hash", ""),
@@ -416,31 +356,21 @@ func (server *HTTPServer) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 		)
 		return
 	}
-
-	server.logger.InfoContext(r.Context(), "!!!1",
-		slog.String("remoteUserRaw", remoteUserRaw),
-		slog.String("remoteUser", remoteUser),
-		slog.String("identityRaw", identityRaw),
-	)
-
-	userHash := HashUser(remoteUser)
+	remoteUser := id.Username
+	userHash := identity.Hash(id)
 
 	// Resolve the upstream by querying the K8s Service object (cached 30s).
 	// The Service's getambassador.io/config annotation contains the real host:port
 	// that Hatchery set at launch time — accounts for external nodes, ECS ALBs,
 	// GPU NodePorts, etc. Falls back to DNS+80 when annotation is absent.
-	upstreamStr, err := LookupUpstreamWithFallback(ctx, server.K8s, server.namespace, remoteUser, identityRaw, remoteUserRaw)
+	upstreamStr, err := LookupUpstreamWithFallback(ctx, server.K8s, server.namespace, id)
 	if err != nil {
-		uid := ParseRemoteUserID(identityRaw)
-		if uid == "" {
-			uid = ParseRemoteUserID(remoteUserRaw)
-		}
 		uidCandidate := ""
-		if uid != "" {
-			uidCandidate = fmt.Sprintf("%s, %s", uid, uid)
+		if id.UID != "" {
+			uidCandidate = fmt.Sprintf("%s, %s", id.UID, id.UID)
 		}
-		log.Printf(`{"time":%q,"msg":"upstream resolution failed","remote_user_header":%q,"identity_raw":%q,"remote_user_normalized":%q,"uid_candidate":%q,"error":%q}`,
-			time.Now().UTC().Format(time.RFC3339), remoteUserRaw, identityRaw, remoteUser, uidCandidate, err.Error())
+		log.Printf(`{"time":%q,"msg":"upstream resolution failed","user_hash":%q,"uid_candidate":%q,"error":%q}`,
+			time.Now().UTC().Format(time.RFC3339), userHash, uidCandidate, err.Error())
 		http.Error(w, "Bad Gateway: workspace not running", http.StatusBadGateway)
 
 		server.logger.ErrorContext(r.Context(), "access28",
@@ -456,7 +386,7 @@ func (server *HTTPServer) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 	target, _ := url.Parse(upstreamStr)
 
 	// With remoteKernelsBaseUrl active, all kernel/session API requests from the
-	// browser go to /jeg-proxy/ (jegProxyHandler). This handler only proxies
+	// browser go through the routes mounted at /jeg-proxy. This handler only proxies
 	// container-local traffic: files, terminals, static assets, etc.
 
 	if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {

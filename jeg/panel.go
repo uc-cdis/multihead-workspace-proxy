@@ -10,23 +10,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/uc-cdis/workspace-proxy/workspace"
+	"github.com/go-chi/chi/v5"
+	"github.com/uc-cdis/workspace-proxy/internal/identity"
 )
 
-func (jeg *JEG) PanelHandler(w http.ResponseWriter, r *http.Request) {
+func (jeg *JEG) panelHandler(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 
-	// Auth: REMOTE_USER is set by revproxy auth_request on /lw-workspace/proxy/*.
-	remoteUserRaw := strings.TrimSpace(r.Header.Get("REMOTE_USER"))
-	identityRaw := strings.TrimSpace(r.Header.Get("X-Gen3-User-ID"))
-	if identityRaw == "" {
-		identityRaw = remoteUserRaw
-	}
-	remoteUser := workspace.NormalizeRemoteUser(identityRaw)
-	if remoteUser == "" {
-		remoteUser = workspace.NormalizeRemoteUser(remoteUserRaw)
-	}
-	if remoteUser == "" {
+	id, ok := identity.FromContext(r.Context())
+	if !ok {
 		http.Error(w, "Forbidden", http.StatusForbidden)
 		jeg.logger.InfoContext(
 			r.Context(),
@@ -40,10 +32,10 @@ func (jeg *JEG) PanelHandler(w http.ResponseWriter, r *http.Request) {
 		)
 		return
 	}
-	userHash := workspace.HashUser(remoteUser)
+	remoteUser := id.Username
+	userHash := identity.Hash(id)
 
-	// /jeg-panel prefix is already stripped by http.StripPrefix in main().
-	panelPath := r.URL.Path
+	panelPath := strings.TrimPrefix(r.URL.Path, "/jeg-panel")
 	if panelPath == "" {
 		panelPath = "/"
 	}
@@ -51,10 +43,7 @@ func (jeg *JEG) PanelHandler(w http.ResponseWriter, r *http.Request) {
 	method := r.Method
 
 	forwardHeaders := func(req *http.Request) {
-		req.Header.Set("REMOTE_USER", remoteUser)
-		// req.Header.Set("remote_user", remoteUser)
-		req.Header.Set("X-Remote-User", remoteUser)
-		req.Header.Set("KERNEL_USERNAME", remoteUser)
+		identity.SetUpstreamHeaders(req.Header, id)
 		req.Header.Del("Connection")
 		req.Header.Del("Upgrade")
 	}
@@ -284,8 +273,7 @@ func (jeg *JEG) PanelHandler(w http.ResponseWriter, r *http.Request) {
 
 	// DELETE /api/kernels/{id} — force-terminate; passed through unconditionally.
 	if method == http.MethodDelete && strings.HasPrefix(panelPath, "/api/kernels/") {
-		kernelID := strings.TrimPrefix(panelPath, "/api/kernels/")
-		kernelID = strings.SplitN(kernelID, "/", 2)[0]
+		kernelID := chi.URLParam(r, "kernelID")
 		if !isValidKernelID(kernelID) {
 			http.Error(w, "Invalid kernel ID", http.StatusBadRequest)
 			jeg.logger.InfoContext(

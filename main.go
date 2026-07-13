@@ -15,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/httplog/v3"
 	"github.com/uc-cdis/workspace-proxy/config"
+	"github.com/uc-cdis/workspace-proxy/internal/identity"
 	"github.com/uc-cdis/workspace-proxy/jeg"
 	"github.com/uc-cdis/workspace-proxy/kubernetes"
 	"github.com/uc-cdis/workspace-proxy/version"
@@ -77,22 +78,22 @@ func service(cfg config.Config, logger *slog.Logger, k8s *kubernetes.Client, jeg
 		w.Write(fmt.Appendf(nil, "all done.\n"))
 	})
 
-	// JEG ghost-gateway: intercept JupyterLab's GatewayClient traffic and apply billing gate.
-	if cfg.JEG.GatewayURL != "" {
-		r.HandleFunc("/jeg-proxy", jeg.ProxyHandler)
-		r.HandleFunc("/jeg-proxy/*", jeg.ProxyHandler)
+	r.Group(func(authenticated chi.Router) {
+		authenticated.Use(identity.Require)
 
-		panel := http.StripPrefix("/jeg-panel", http.HandlerFunc(jeg.PanelHandler))
-		r.Handle("/jeg-panel", panel)
-		r.Handle("/jeg-panel/*", panel)
+		// JEG ghost-gateway: intercept JupyterLab's GatewayClient traffic and apply billing gate.
+		if cfg.JEG.GatewayURL != "" {
+			authenticated.Mount("/jeg-proxy", jeg.ProxyRoutes())
+			authenticated.Mount("/jeg-panel", jeg.PanelRoutes())
 
-		logger.Info("JEG ghost gateway + panel API enabled",
-			slog.String("jeg_gateway_url", cfg.JEG.GatewayURL),
-		)
-	}
+			logger.Info("JEG ghost gateway + panel API enabled",
+				slog.String("jeg_gateway_url", cfg.JEG.GatewayURL),
+			)
+		}
 
-	// All workspace traffic — authenticated and routed by REMOTE_USER.
-	r.HandleFunc("/*", proxy.ProxyHandler)
+		// All workspace traffic is authenticated and routed by the canonical identity.
+		authenticated.HandleFunc("/*", proxy.ProxyHandler)
+	})
 
 	return r
 }

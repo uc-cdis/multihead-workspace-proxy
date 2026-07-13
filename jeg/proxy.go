@@ -14,31 +14,24 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/uc-cdis/workspace-proxy/internal/identity"
 	"github.com/uc-cdis/workspace-proxy/proxy"
 	"github.com/uc-cdis/workspace-proxy/workspace"
 )
 
-func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
+func (jeg *JEG) proxyHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	start := time.Now()
 
-	// Auth: REMOTE_USER must be present (set by revproxy auth_request).
-	// All requests arrive from the browser via remoteKernelsBaseUrl → revproxy.
-	remoteUserRaw := strings.TrimSpace(r.Header.Get("REMOTE_USER"))
-	identityRaw := strings.TrimSpace(r.Header.Get("X-Gen3-User-ID"))
-	if identityRaw == "" {
-		identityRaw = remoteUserRaw
-	}
-	remoteUser := workspace.NormalizeRemoteUser(identityRaw)
-	if remoteUser == "" {
-		remoteUser = workspace.NormalizeRemoteUser(remoteUserRaw)
-	}
-	if remoteUser == "" {
+	id, ok := identity.FromContext(ctx)
+	if !ok {
 		http.Error(w, "Forbidden", http.StatusForbidden)
 		// logAccess("", jegGatewayURL, r.Method, r.URL.Path, http.StatusForbidden, time.Since(start))
 		return
 	}
-	userHash := workspace.HashUser(remoteUser)
+	remoteUser := id.Username
+	userHash := identity.Hash(id)
 
 	// Strip the /jeg-proxy prefix to get the kernel-API-relative path.
 	jegPath := strings.TrimPrefix(r.URL.Path, "/jeg-proxy")
@@ -51,12 +44,7 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 	// Common upstream headers forwarded to JEG.
 	forwardJEGHeaders := func(req *http.Request) {
 		log.Printf("REMOTE_USER %+v", remoteUser)
-		// log.Printf("remote_user %+v", remoteUser)
-
-		req.Header.Set("REMOTE_USER", remoteUser)
-		// req.Header.Set("remote_user", remoteUser)
-		req.Header.Set("X-Remote-User", remoteUser)
-		req.Header.Set("KERNEL_USERNAME", remoteUser)
+		identity.SetUpstreamHeaders(req.Header, id)
 		req.Header.Del("Connection")
 		req.Header.Del("Upgrade")
 	}
@@ -65,7 +53,7 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Resolve the user's micro-container upstream (soft-fail: empty string if not running).
 	// Used to fetch local kernelspecs, route local kernel launches, and proxy contents/sessions.
-	microUpstream, _ := workspace.LookupUpstreamWithFallback(ctx, jeg.K8s, jeg.workspaceNamespace, remoteUser, identityRaw, remoteUserRaw)
+	microUpstream, _ := workspace.LookupUpstreamWithFallback(ctx, jeg.K8s, jeg.workspaceNamespace, id)
 
 	// ---- Route dispatch ----
 
@@ -106,7 +94,7 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 				req.Header[key] = r.Header[key]
 				log.Printf("&10 copied_header=%q value=%q", key, req.Header[key])
 			}
-			req.Header.Set("REMOTE_USER", remoteUser)
+			identity.SetUpstreamHeaders(req.Header, id)
 			log.Printf("&11 remoteUser=%q", remoteUser)
 			if r.URL.RawQuery != "" {
 				req.URL.RawQuery = r.URL.RawQuery
@@ -151,9 +139,7 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 		if method == http.MethodGet {
 			// Single session by ID: try container, then override map.
 			if strings.HasPrefix(jegPath, "/api/sessions/") {
-				sessionID := strings.TrimPrefix(jegPath, "/api/sessions/")
-				sessionID = strings.SplitN(sessionID, "/", 2)[0]
-				sessionID = strings.SplitN(sessionID, "?", 2)[0]
+				sessionID := chi.URLParam(r, "sessionID")
 
 				if microUpstream != "" {
 					cStatus, cHdr, cBody, cErr := proxySessionToContainerBuffered()
@@ -391,8 +377,7 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 
 		// PATCH /api/sessions/{id} — kernel switch.
 		if method == http.MethodPatch && strings.HasPrefix(jegPath, "/api/sessions/") {
-			sessionID := strings.TrimPrefix(jegPath, "/api/sessions/")
-			sessionID = strings.SplitN(sessionID, "/", 2)[0]
+			sessionID := chi.URLParam(r, "sessionID")
 
 			var patchReq struct {
 				Path   string `json:"path"`
@@ -506,7 +491,7 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 					up := strings.TrimRight(microUpstream, "/") + proxy.UpstreamPrefix + "/api/sessions"
 					pReq, _ := http.NewRequest(http.MethodPost, up, bytes.NewReader(postPayload))
 					pReq.Header.Set("Content-Type", "application/json")
-					pReq.Header.Set("REMOTE_USER", remoteUser)
+					identity.SetUpstreamHeaders(pReq.Header, id)
 					pResp, pErr := http.DefaultClient.Do(pReq)
 					if pErr == nil {
 						defer pResp.Body.Close()
@@ -547,8 +532,7 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 
 		// DELETE /api/sessions/{id}
 		if method == http.MethodDelete && strings.HasPrefix(jegPath, "/api/sessions/") {
-			sessionID := strings.TrimPrefix(jegPath, "/api/sessions/")
-			sessionID = strings.SplitN(sessionID, "/", 2)[0]
+			sessionID := chi.URLParam(r, "sessionID")
 			jeg.clearSessionKernelOverride(remoteUser, sessionID)
 
 			if microUpstream != "" {
@@ -632,8 +616,7 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 	// if JEG owns the kernel ID, always tunnel to JEG; otherwise try container.
 	if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") &&
 		strings.HasPrefix(jegPath, "/api/kernels/") {
-		kernelID := strings.TrimPrefix(jegPath, "/api/kernels/")
-		kernelID = strings.SplitN(kernelID, "/", 2)[0]
+		kernelID := chi.URLParam(r, "kernelID")
 		if sid := strings.TrimSpace(r.URL.Query().Get("session_id")); sid != "" {
 			if override, ok := jeg.getSessionKernelOverride(remoteUser, sid); ok {
 				overrideKernelID := strings.TrimSpace(override.KernelID)
@@ -664,8 +647,7 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 			// it deletes Connection and Upgrade from r.Header, which our proxyWebSocket
 			// needs to forward in the WS handshake (Sec-WebSocket-Key etc. are in
 			// r.Header; Connection/Upgrade are written explicitly by proxyWebSocket).
-			r.Header.Set("REMOTE_USER", remoteUser)
-			r.Header.Set("remote_user", remoteUser)
+			identity.SetUpstreamHeaders(r.Header, id)
 			status := proxy.ProxyWebSocket(w, r, &target)
 			jeg.logger.InfoContext(r.Context(), "access23",
 				slog.String("user_hash", userHash),
@@ -681,7 +663,7 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 			containerWS, _ := url.Parse(microUpstream)
 			containerWS.Path = proxy.UpstreamPrefix + jegPath
 			containerWS.RawQuery = r.URL.RawQuery
-			r.Header.Set("REMOTE_USER", remoteUser)
+			identity.SetUpstreamHeaders(r.Header, id)
 			status := proxy.ProxyWebSocket(w, r, containerWS)
 			jeg.logger.InfoContext(r.Context(), "access24",
 				slog.String("user_hash", userHash),
@@ -701,8 +683,7 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 			// it deletes Connection and Upgrade from r.Header, which our proxyWebSocket
 			// needs to forward in the WS handshake (Sec-WebSocket-Key etc. are in
 			// r.Header; Connection/Upgrade are written explicitly by proxyWebSocket).
-			r.Header.Set("REMOTE_USER", remoteUser)
-			r.Header.Set("remote_user", remoteUser)
+			identity.SetUpstreamHeaders(r.Header, id)
 			status := proxy.ProxyWebSocket(w, r, &target)
 			jeg.logger.InfoContext(r.Context(), "access26",
 				slog.String("user_hash", userHash),
@@ -855,8 +836,7 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 
 	// GET /api/kernels/{id} — stateless with JEG precedence.
 	if method == http.MethodGet && strings.HasPrefix(jegPath, "/api/kernels/") {
-		kernelID := strings.TrimPrefix(jegPath, "/api/kernels/")
-		kernelID = strings.SplitN(kernelID, "/", 2)[0]
+		kernelID := chi.URLParam(r, "kernelID")
 		if !isValidKernelID(kernelID) {
 			http.Error(w, "Invalid kernel ID", http.StatusBadRequest)
 			jeg.logger.InfoContext(
@@ -998,7 +978,7 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 		if microUpstream != "" {
 			containerURL := strings.TrimRight(microUpstream, "/") + proxy.UpstreamPrefix + "/api/kernels"
 			contReq, _ := http.NewRequest(http.MethodGet, containerURL, nil)
-			contReq.Header.Set("REMOTE_USER", remoteUser)
+			identity.SetUpstreamHeaders(contReq.Header, id)
 			if contResp, err := http.DefaultClient.Do(contReq); err == nil {
 				defer contResp.Body.Close()
 				var localKernels []kernelEntry
@@ -1046,8 +1026,7 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 
 	// DELETE /api/kernels/{id} — stateless with JEG precedence.
 	if method == http.MethodDelete && strings.HasPrefix(jegPath, "/api/kernels/") {
-		kernelID := strings.TrimPrefix(jegPath, "/api/kernels/")
-		kernelID = strings.SplitN(kernelID, "/", 2)[0]
+		kernelID := chi.URLParam(r, "kernelID")
 		if !isValidKernelID(kernelID) {
 			http.Error(w, "Invalid kernel ID", http.StatusBadRequest)
 			jeg.logger.InfoContext(

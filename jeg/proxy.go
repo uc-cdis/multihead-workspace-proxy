@@ -137,9 +137,29 @@ func (jeg *JEG) proxyHandler(w http.ResponseWriter, r *http.Request) {
 
 		// GET /api/sessions — merge container sessions + synthesized JEG sessions.
 		if method == http.MethodGet {
-			// Single session by ID: try container, then override map.
+			// Single session by ID: an active JEG override must win over the
+			// stale local session that existed before the kernel switch.
 			if strings.HasPrefix(jegPath, "/api/sessions/") {
 				sessionID := chi.URLParam(r, "sessionID")
+
+				if override, ok := jeg.getSessionKernelOverride(remoteUser, sessionID); ok {
+					if jeg.jegHasKernel(override.KernelID, remoteUser) {
+						out := buildSessionCompatResponse(sessionID, override, nil)
+						w.Header().Set("Content-Type", "application/json")
+						w.WriteHeader(http.StatusOK)
+						_, _ = w.Write(out)
+						jeg.logger.InfoContext(r.Context(), "access4",
+							slog.String("user_hash", userHash),
+							slog.String("action", "override"),
+							slog.String("method", method),
+							slog.String("path", r.URL.Path),
+							slog.Int("status", http.StatusOK),
+							slog.Duration("duration", time.Since(start)),
+						)
+						return
+					}
+					jeg.clearSessionKernelOverride(remoteUser, sessionID)
+				}
 
 				if microUpstream != "" {
 					cStatus, cHdr, cBody, cErr := proxySessionToContainerBuffered()
@@ -155,22 +175,6 @@ func (jeg *JEG) proxyHandler(w http.ResponseWriter, r *http.Request) {
 						return
 					}
 				}
-				// Container didn't have it — check override map (JEG synthetic session).
-				if override, ok := jeg.getSessionKernelOverride(remoteUser, sessionID); ok {
-					out := buildSessionCompatResponse(sessionID, override, nil)
-					w.Header().Set("Content-Type", "application/json")
-					w.WriteHeader(http.StatusOK)
-					_, _ = w.Write(out)
-					jeg.logger.InfoContext(r.Context(), "access4",
-						slog.String("user_hash", userHash),
-						slog.String("action", "override"),
-						slog.String("method", method),
-						slog.String("path", r.URL.Path),
-						slog.Int("status", http.StatusOK),
-						slog.Duration("duration", time.Since(start)),
-					)
-					return
-				}
 				http.Error(w, "session not found", http.StatusNotFound)
 				jeg.logger.InfoContext(r.Context(), "access6",
 					slog.String("user_hash", userHash),
@@ -184,7 +188,11 @@ func (jeg *JEG) proxyHandler(w http.ResponseWriter, r *http.Request) {
 
 			// Session list: merge container sessions + JEG kernel-backed overrides.
 			var merged []json.RawMessage
-			containerIDs := map[string]struct{}{}
+			jegKernels := jeg.listJEGKernels(remoteUser)
+			jegKernelMap := map[string]*jegKernelInfo{}
+			for i := range jegKernels {
+				jegKernelMap[strings.TrimSpace(jegKernels[i].ID)] = &jegKernels[i]
+			}
 
 			if microUpstream != "" {
 				cStatus, _, cBody, cErr := proxySessionToContainerBuffered()
@@ -195,20 +203,19 @@ func (jeg *JEG) proxyHandler(w http.ResponseWriter, r *http.Request) {
 							var sess struct {
 								ID string `json:"id"`
 							}
-							if json.Unmarshal(s, &sess) == nil && strings.TrimSpace(sess.ID) != "" {
-								containerIDs[strings.TrimSpace(sess.ID)] = struct{}{}
+							if json.Unmarshal(s, &sess) == nil {
+								sessionID := strings.TrimSpace(sess.ID)
+								if override, overridden := jeg.getSessionKernelOverride(remoteUser, sessionID); overridden {
+									if _, live := jegKernelMap[strings.TrimSpace(override.KernelID)]; live {
+										continue
+									}
+									jeg.clearSessionKernelOverride(remoteUser, sessionID)
+								}
 							}
 							merged = append(merged, s)
 						}
 					}
 				}
-			}
-
-			// Fetch live JEG kernel data once for enriching synthesized sessions.
-			jegKernels := jeg.listJEGKernels(remoteUser)
-			jegKernelMap := map[string]*jegKernelInfo{}
-			for i := range jegKernels {
-				jegKernelMap[strings.TrimSpace(jegKernels[i].ID)] = &jegKernels[i]
 			}
 
 			// Synthesize session entries for active JEG kernels from override map.
@@ -223,9 +230,6 @@ func (jeg *JEG) proxyHandler(w http.ResponseWriter, r *http.Request) {
 					return true
 				}
 				sid := strings.TrimPrefix(key, prefix)
-				if _, dup := containerIDs[sid]; dup {
-					return true // skip if container already has a session with this ID
-				}
 				// Only include if JEG still has the kernel running.
 				live, ok := jegKernelMap[strings.TrimSpace(override.KernelID)]
 				if !ok {
@@ -380,9 +384,9 @@ func (jeg *JEG) proxyHandler(w http.ResponseWriter, r *http.Request) {
 			sessionID := chi.URLParam(r, "sessionID")
 
 			var patchReq struct {
-				Path   string `json:"path"`
-				Name   string `json:"name"`
-				Type   string `json:"type"`
+				Path   *string `json:"path"`
+				Name   *string `json:"name"`
+				Type   *string `json:"type"`
 				Kernel struct {
 					ID   string `json:"id"`
 					Name string `json:"name"`
@@ -393,6 +397,16 @@ func (jeg *JEG) proxyHandler(w http.ResponseWriter, r *http.Request) {
 			patchKernelID := strings.TrimSpace(patchReq.Kernel.ID)
 			patchKernelName := strings.TrimSpace(patchReq.Kernel.Name)
 
+			// A kernel-only PATCH omits notebook metadata. Resolve it before
+			// changing session ownership so the response retains the file path.
+			metadata := sessionMetadata{}
+			if override, ok := jeg.getSessionKernelOverride(remoteUser, sessionID); ok {
+				metadata = metadataFromOverride(override)
+			} else if containerMetadata, ok := fetchContainerSessionMetadata(ctx, microUpstream, sessionID, id); ok {
+				metadata = containerMetadata
+			}
+			metadata = applySessionMetadataPatch(metadata, patchReq.Path, patchReq.Name, patchReq.Type)
+
 			// If switching to a JEG kernel, synthesize the response.
 			if patchKernelID == "" && patchKernelName != "" {
 				patchKernelID = jeg.findJEGKernelIDByName(remoteUser, patchKernelName)
@@ -402,12 +416,9 @@ func (jeg *JEG) proxyHandler(w http.ResponseWriter, r *http.Request) {
 				if patchKernelName == "" {
 					patchKernelName = jeg.findJEGKernelNameByID(remoteUser, patchKernelID)
 				}
-				sessPath := strings.TrimSpace(patchReq.Path)
-				sessName := strings.TrimSpace(patchReq.Name)
-				sessType := strings.TrimSpace(patchReq.Type)
-				if sessType == "" {
-					sessType = "notebook"
-				}
+				sessPath := metadata.Path
+				sessName := metadata.Name
+				sessType := metadata.Type
 				jeg.setSessionKernelOverride(remoteUser, sessionID, patchKernelID, patchKernelName, sessPath, sessName, sessType)
 				out := buildSessionCompatResponse(sessionID, sessionKernelOverride{
 					KernelID: patchKernelID, KernelName: patchKernelName,
@@ -431,15 +442,9 @@ func (jeg *JEG) proxyHandler(w http.ResponseWriter, r *http.Request) {
 			// If the session is a JEG override with no kernel change, update metadata.
 			if patchKernelID == "" && patchKernelName == "" {
 				if override, ok := jeg.getSessionKernelOverride(remoteUser, sessionID); ok {
-					if strings.TrimSpace(patchReq.Path) != "" {
-						override.Path = strings.TrimSpace(patchReq.Path)
-					}
-					if strings.TrimSpace(patchReq.Name) != "" {
-						override.Name = strings.TrimSpace(patchReq.Name)
-					}
-					if strings.TrimSpace(patchReq.Type) != "" {
-						override.Type = strings.TrimSpace(patchReq.Type)
-					}
+					override.Path = metadata.Path
+					override.Name = metadata.Name
+					override.Type = metadata.Type
 					jeg.setSessionKernelOverride(remoteUser, sessionID, override.KernelID, override.KernelName, override.Path, override.Name, override.Type)
 					out := buildSessionCompatResponse(sessionID, override, nil)
 					w.Header().Set("Content-Type", "application/json")
@@ -478,14 +483,10 @@ func (jeg *JEG) proxyHandler(w http.ResponseWriter, r *http.Request) {
 				if status == http.StatusNotFound && patchKernelName != "" &&
 					isLocalContainerSpec(microUpstream, patchKernelName, remoteUser) {
 					jeg.clearSessionKernelOverride(remoteUser, sessionID)
-					sessType := strings.TrimSpace(patchReq.Type)
-					if sessType == "" {
-						sessType = "notebook"
-					}
 					postPayload, _ := json.Marshal(map[string]interface{}{
-						"path":   patchReq.Path,
-						"name":   patchReq.Name,
-						"type":   sessType,
+						"path":   metadata.Path,
+						"name":   metadata.Name,
+						"type":   metadata.Type,
 						"kernel": map[string]string{"name": patchKernelName},
 					})
 					up := strings.TrimRight(microUpstream, "/") + proxy.UpstreamPrefix + "/api/sessions"

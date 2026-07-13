@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/uc-cdis/workspace-proxy/internal/identity"
 	"github.com/uc-cdis/workspace-proxy/kubernetes"
 	"github.com/uc-cdis/workspace-proxy/proxy"
 )
@@ -41,6 +42,102 @@ type sessionKernelOverride struct {
 	Name       string
 	Type       string
 	UpdatedAt  time.Time
+}
+
+type sessionMetadata struct {
+	Path string
+	Name string
+	Type string
+}
+
+func metadataFromOverride(override sessionKernelOverride) sessionMetadata {
+	return sessionMetadata{
+		Path: strings.TrimSpace(override.Path),
+		Name: strings.TrimSpace(override.Name),
+		Type: strings.TrimSpace(override.Type),
+	}
+}
+
+// fillMissingSessionMetadata keeps metadata already associated with the active
+// session and fills any gaps from another representation of that session.
+func fillMissingSessionMetadata(current, fallback sessionMetadata) sessionMetadata {
+	if current.Path == "" {
+		current.Path = strings.TrimSpace(fallback.Path)
+	}
+	if current.Name == "" {
+		current.Name = strings.TrimSpace(fallback.Name)
+	}
+	if current.Type == "" {
+		current.Type = strings.TrimSpace(fallback.Type)
+	}
+	return current
+}
+
+// applySessionMetadataPatch follows PATCH semantics: an omitted property keeps
+// its old value, while an explicitly supplied property (including "") replaces
+// it. JupyterLab normally sends only kernel during a kernel switch.
+func applySessionMetadataPatch(current sessionMetadata, path, name, sessionType *string) sessionMetadata {
+	if path != nil {
+		current.Path = strings.TrimSpace(*path)
+	}
+	if name != nil {
+		current.Name = strings.TrimSpace(*name)
+	}
+	if sessionType != nil {
+		current.Type = strings.TrimSpace(*sessionType)
+	}
+	if current.Type == "" {
+		current.Type = "notebook"
+	}
+	return current
+}
+
+// fetchContainerSessionMetadata gets the notebook identity before a local
+// session is replaced by a synthetic JEG session. Kernel-only PATCH requests do
+// not carry these fields, but JupyterLab still requires them in the response.
+func fetchContainerSessionMetadata(ctx context.Context, microBase, sessionID string, id identity.Identity) (sessionMetadata, bool) {
+	if strings.TrimSpace(microBase) == "" || strings.TrimSpace(sessionID) == "" {
+		return sessionMetadata{}, false
+	}
+
+	upstream := strings.TrimRight(microBase, "/") + proxy.UpstreamPrefix + "/api/sessions/" + strings.TrimSpace(sessionID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, upstream, nil)
+	if err != nil {
+		return sessionMetadata{}, false
+	}
+	identity.SetUpstreamHeaders(req.Header, id)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return sessionMetadata{}, false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return sessionMetadata{}, false
+	}
+
+	var session struct {
+		Path     string `json:"path"`
+		Name     string `json:"name"`
+		Type     string `json:"type"`
+		Notebook struct {
+			Path string `json:"path"`
+			Name string `json:"name"`
+		} `json:"notebook"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&session); err != nil {
+		return sessionMetadata{}, false
+	}
+	metadata := sessionMetadata{
+		Path: strings.TrimSpace(session.Path),
+		Name: strings.TrimSpace(session.Name),
+		Type: strings.TrimSpace(session.Type),
+	}
+	metadata = fillMissingSessionMetadata(metadata, sessionMetadata{
+		Path: session.Notebook.Path,
+		Name: session.Notebook.Name,
+		Type: "notebook",
+	})
+	return metadata, true
 }
 
 type jegKernelPolicy struct {

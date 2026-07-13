@@ -575,7 +575,7 @@ func (jeg *JEG) proxyHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		r.Body = io.NopCloser(bytes.NewReader(body))
-		status := proxy.ProxyToContainer(w, r, jegPath, microUpstream, remoteUser)
+		status := proxy.ProxyToContainer(w, r, jegPath, microUpstream, id)
 		jeg.logger.InfoContext(r.Context(), "access20",
 			slog.String("user_hash", userHash),
 			slog.String("upstream", microUpstream),
@@ -600,7 +600,7 @@ func (jeg *JEG) proxyHandler(w http.ResponseWriter, r *http.Request) {
 			)
 			return
 		}
-		status := proxy.ProxyToContainer(w, r, jegPath, microUpstream, remoteUser)
+		status := proxy.ProxyToContainer(w, r, jegPath, microUpstream, id)
 		jeg.logger.InfoContext(r.Context(), "access22",
 			slog.String("user_hash", userHash),
 			slog.String("upstream", microUpstream),
@@ -643,12 +643,9 @@ func (jeg *JEG) proxyHandler(w http.ResponseWriter, r *http.Request) {
 			target := *jegBase
 			target.Path = jegPath
 			target.RawQuery = r.URL.RawQuery
-			// Set user identity headers; do NOT call forwardJEGHeaders here because
-			// it deletes Connection and Upgrade from r.Header, which our proxyWebSocket
-			// needs to forward in the WS handshake (Sec-WebSocket-Key etc. are in
-			// r.Header; Connection/Upgrade are written explicitly by proxyWebSocket).
+
 			identity.SetUpstreamHeaders(r.Header, id)
-			status := proxy.ProxyWebSocket(w, r, &target)
+			status := proxy.Proxy(w, r, &target)
 			jeg.logger.InfoContext(r.Context(), "access23",
 				slog.String("user_hash", userHash),
 				slog.String("upstream", jeg.gatewayURL),
@@ -664,7 +661,7 @@ func (jeg *JEG) proxyHandler(w http.ResponseWriter, r *http.Request) {
 			containerWS.Path = proxy.UpstreamPrefix + jegPath
 			containerWS.RawQuery = r.URL.RawQuery
 			identity.SetUpstreamHeaders(r.Header, id)
-			status := proxy.ProxyWebSocket(w, r, containerWS)
+			status := proxy.Proxy(w, r, containerWS)
 			jeg.logger.InfoContext(r.Context(), "access24",
 				slog.String("user_hash", userHash),
 				slog.String("upstream", microUpstream),
@@ -679,12 +676,9 @@ func (jeg *JEG) proxyHandler(w http.ResponseWriter, r *http.Request) {
 			target := *jegBase
 			target.Path = jegPath
 			target.RawQuery = r.URL.RawQuery
-			// Set user identity headers; do NOT call forwardJEGHeaders here because
-			// it deletes Connection and Upgrade from r.Header, which our proxyWebSocket
-			// needs to forward in the WS handshake (Sec-WebSocket-Key etc. are in
-			// r.Header; Connection/Upgrade are written explicitly by proxyWebSocket).
+
 			identity.SetUpstreamHeaders(r.Header, id)
-			status := proxy.ProxyWebSocket(w, r, &target)
+			status := proxy.Proxy(w, r, &target)
 			jeg.logger.InfoContext(r.Context(), "access26",
 				slog.String("user_hash", userHash),
 				slog.String("upstream", jeg.gatewayURL),
@@ -801,7 +795,7 @@ func (jeg *JEG) proxyHandler(w http.ResponseWriter, r *http.Request) {
 		if microUpstream != "" && isLocalContainerSpec(microUpstream, launchReq.Name, remoteUser) {
 			// Container owns this spec — forward launch to the container's Jupyter.
 			r.Body = io.NopCloser(bytes.NewReader(body))
-			status := proxy.ProxyToContainer(w, r, "/api/kernels", microUpstream, remoteUser)
+			status := proxy.ProxyToContainer(w, r, "/api/kernels", microUpstream, id)
 			log.Printf(`{"msg":"local kernel launched","spec":%q,"status":%d}`, launchReq.Name, status)
 			jeg.logger.InfoContext(
 				r.Context(),
@@ -888,7 +882,7 @@ func (jeg *JEG) proxyHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if microUpstream != "" && containerHasKernel(microUpstream, kernelID, remoteUser) {
-			status := proxy.ProxyToContainer(w, r, jegPath, microUpstream, remoteUser)
+			status := proxy.ProxyToContainer(w, r, jegPath, microUpstream, id)
 			jeg.logger.InfoContext(
 				r.Context(),
 				"access66",
@@ -1082,7 +1076,7 @@ func (jeg *JEG) proxyHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if microUpstream != "" && containerHasKernel(microUpstream, kernelID, remoteUser) {
-			status := proxy.ProxyToContainer(w, r, "/api/kernels/"+kernelID, microUpstream, remoteUser)
+			status := proxy.ProxyToContainer(w, r, "/api/kernels/"+kernelID, microUpstream, id)
 			jeg.logger.InfoContext(
 				r.Context(),
 				"access73",
@@ -1155,7 +1149,7 @@ func (jeg *JEG) proxyHandler(w http.ResponseWriter, r *http.Request) {
 			)
 			return
 		}
-		status := proxy.ProxyToContainer(w, r, containerPath, microUpstream, remoteUser)
+		status := proxy.ProxyToContainer(w, r, containerPath, microUpstream, id)
 		jeg.logger.InfoContext(
 			r.Context(),
 			"access77",

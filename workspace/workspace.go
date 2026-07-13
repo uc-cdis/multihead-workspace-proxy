@@ -6,7 +6,6 @@ import (
 	"log"
 	"log/slog"
 	"net/http"
-	"net/http/httputil"
 	"net/url"
 	"strings"
 	"sync"
@@ -383,92 +382,9 @@ func (server *HTTPServer) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	target, _ := url.Parse(upstreamStr)
-
-	// With remoteKernelsBaseUrl active, all kernel/session API requests from the
-	// browser go through the routes mounted at /jeg-proxy. This handler only proxies
-	// container-local traffic: files, terminals, static assets, etc.
-
-	if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
-		status := proxy.ProxyWebSocket(w, r, target)
-		fmt.Print(status)
-		server.logger.InfoContext(r.Context(), "access29",
-			slog.String("user_hash", userHash),
-			slog.String("upstream", upstreamStr),
-			slog.String("method", r.Method),
-			slog.String("path", r.URL.Path),
-			slog.Int("status", status),
-		)
-		return
-	}
-
-	// Cap non-WebSocket request bodies to 2 MiB to prevent memory exhaustion.
-	r.Body = http.MaxBytesReader(w, r.Body, 2*1024*1024)
-
-	sr := &proxy.StatusRecorder{ResponseWriter: w, Status: http.StatusOK}
-	proxy := &httputil.ReverseProxy{
-		Director: func(req *http.Request) {
-			log.Printf("&0 incoming scheme=%q host=%q path=%q rawPath=%q req.Host=%q",
-				req.URL.Scheme,
-				req.URL.Host,
-				req.URL.Path,
-				req.URL.RawPath,
-				req.Host,
-			)
-
-			req.URL.Scheme = target.Scheme
-			log.Printf("&1 req.URL.Scheme=%q", req.URL.Scheme)
-
-			req.URL.Host = target.Host
-			log.Printf("&2 req.URL.Host=%q", req.URL.Host)
-
-			req.Host = target.Host
-			log.Printf("&3 req.Host=%q", req.Host)
-
-			// Restore prefix: nginx strips it, Jupyter expects it as its base URL.
-			req.URL.Path = ensureUpstreamPrefix(req.URL.Path)
-			log.Printf("&4 req.URL.Path=%q", req.URL.Path)
-
-			if req.URL.RawPath != "" {
-				req.URL.RawPath = ensureUpstreamPrefix(req.URL.RawPath)
-				log.Printf("&5 req.URL.RawPath=%q", req.URL.RawPath)
-			} else {
-				log.Printf("&5 req.URL.RawPath=%q (unchanged)", req.URL.RawPath)
-			}
-			server.logger.InfoContext(req.Context(), "proxy outbound",
-				slog.String("method", req.Method),
-				slog.String("url", req.URL.String()),
-				slog.String("scheme", req.URL.Scheme),
-				slog.String("host", req.URL.Host),
-				slog.String("path", req.URL.Path),
-				slog.String("raw_path", req.URL.RawPath),
-				slog.String("request_host", req.Host),
-			)
-		},
-		FlushInterval: 100 * time.Millisecond,
-	}
-
-	log.Printf("&6 proxy.FlushInterval=%v", proxy.FlushInterval)
-
-	proxy.ModifyResponse = func(resp *http.Response) error {
-		server.logger.InfoContext(resp.Request.Context(), "proxy upstream response",
-			slog.Int("status", resp.StatusCode),
-			slog.String("status_text", resp.Status),
-			slog.String("url", resp.Request.URL.String()),
-			slog.String("content_type", resp.Header.Get("Content-Type")),
-			slog.Int64("content_length", resp.ContentLength),
-		)
-
-		// Returning a non-nil error here deliberately invokes ErrorHandler.
-		return nil
-	}
-
-	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
-		// Evict both caches so the next request re-queries K8s — pod may have restarted,
-		// moved to a different node, or been replaced with a different port.
-		upstreamCache.Delete(remoteUser)
-		evictSvcListCache()
-		http.Error(w, "Bad Gateway: workspace unavailable", http.StatusBadGateway)
+	target, err := url.Parse(upstreamStr)
+	if err != nil || target.Scheme == "" || target.Host == "" {
+		http.Error(w, "Bad Gateway: invalid workspace upstream", http.StatusBadGateway)
 		server.logger.ErrorContext(r.Context(), "access30",
 			slog.String("user_hash", userHash),
 			slog.String("upstream", upstreamStr),
@@ -477,13 +393,30 @@ func (server *HTTPServer) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 			slog.Int("status", http.StatusBadGateway),
 			slog.Any("error", err),
 		)
+		return
 	}
-	proxy.ServeHTTP(sr, r)
+
+	// With remoteKernelsBaseUrl active, all kernel/session API requests from the
+	// browser go through the routes mounted at /jeg-proxy. This handler only proxies
+	// container-local traffic: files, terminals, static assets, etc.
+
+	requestTarget := *target
+	requestTarget.Path = ensureUpstreamPrefix(r.URL.Path)
+	if r.URL.RawPath != "" {
+		requestTarget.RawPath = ensureUpstreamPrefix(r.URL.RawPath)
+	}
+	requestTarget.RawQuery = r.URL.RawQuery
+	status := proxy.Proxy(w, r, &requestTarget)
+	if status == http.StatusBadGateway {
+		// The workspace may have restarted or moved since it was discovered.
+		upstreamCache.Delete(remoteUser)
+		evictSvcListCache()
+	}
 	server.logger.InfoContext(r.Context(), "access31",
 		slog.String("user_hash", userHash),
 		slog.String("upstream", upstreamStr),
 		slog.String("method", r.Method),
 		slog.String("path", r.URL.Path),
-		slog.Int("status", sr.Status),
+		slog.Int("status", status),
 	)
 }

@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -21,15 +20,6 @@ import (
 
 const upstreamCacheTTL = 30 * time.Second
 const svcListCacheTTL = 10 * time.Second
-
-func envOrDefault(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return def
-}
-
-var workspaceNS = envOrDefault("WORKSPACE_NAMESPACE", "jupyter-pods")
 
 func escapism(input string) string {
 	const safe = "abcdefghijklmnopqrstuvwxyz0123456789"
@@ -201,7 +191,7 @@ func evictSvcListCache() {
 
 // lookupUpstream returns the HTTP upstream base URL for the given username,
 // using the cache when valid and querying K8s when not.
-func lookupUpstream(ctx context.Context, k8s *kubernetes.Client, username string) (string, error) {
+func lookupUpstream(ctx context.Context, k8s *kubernetes.Client, namespace, username string) (string, error) {
 
 	log.Printf("%+v", username)
 	log.Printf("%+v", &upstreamCache)
@@ -218,7 +208,7 @@ func lookupUpstream(ctx context.Context, k8s *kubernetes.Client, username string
 
 	log.Printf("!!!2%+v", svcName)
 
-	upstream, err := resolveUpstream(ctx, k8s, svcName)
+	upstream, err := resolveUpstream(ctx, k8s, namespace, svcName)
 	log.Printf("!!!3a%+v", upstream)
 	if err != nil {
 		return "", err
@@ -288,8 +278,8 @@ func lookupByAnnotationRemoteUser(k8s *kubernetes.Client, username, identityRaw,
 	return "", fmt.Errorf("no service annotation matched remote_user for %q", username)
 }
 
-func LookupUpstreamWithFallback(ctx context.Context, k8s *kubernetes.Client, username string, identityRaw string, remoteUserHeader string) (string, error) {
-	upstream, err := lookupUpstream(ctx, k8s, username)
+func LookupUpstreamWithFallback(ctx context.Context, k8s *kubernetes.Client, namespace, username, identityRaw, remoteUserHeader string) (string, error) {
+	upstream, err := lookupUpstream(ctx, k8s, namespace, username)
 	if err == nil {
 		return upstream, nil
 	}
@@ -308,7 +298,7 @@ func LookupUpstreamWithFallback(ctx context.Context, k8s *kubernetes.Client, use
 	log.Printf("\t%+v\n", uid)
 	// Hatchery can derive service names from "<uid>, <uid>" (e.g. "4, 4" -> h-4-2c-204-s).
 	uidHatcheryUser := fmt.Sprintf("%s, %s", uid, uid)
-	upstreamByUID, uidErr := lookupUpstream(ctx, k8s, uidHatcheryUser)
+	upstreamByUID, uidErr := lookupUpstream(ctx, k8s, namespace, uidHatcheryUser)
 
 	log.Printf("\t%+v\n", uidHatcheryUser)
 	log.Printf("\t%+v\n", upstreamByUID)
@@ -335,12 +325,12 @@ func LookupUpstreamWithFallback(ctx context.Context, k8s *kubernetes.Client, use
 
 // resolveUpstream fetches the K8s Service object and returns the upstream URL,
 // preferring the host:port from the getambassador.io/config annotation.
-func resolveUpstream(ctx context.Context, k8s *kubernetes.Client, serviceName string) (string, error) {
+func resolveUpstream(ctx context.Context, k8s *kubernetes.Client, namespace, serviceName string) (string, error) {
 	log.Printf("!!!3b%+v", serviceName)
-	log.Printf("!!!3c%+v", workspaceNS)
+	log.Printf("!!!3c%+v", namespace)
 	if k8s == nil {
 		// Not in-cluster (local dev without service account) — plain DNS + port 80.
-		return fmt.Sprintf("http://%s.%s.svc.cluster.local:80", serviceName, workspaceNS), nil
+		return fmt.Sprintf("http://%s.%s.svc.cluster.local:80", serviceName, namespace), nil
 	}
 
 	service, err := k8s.GetWorkspaceService(ctx, serviceName)
@@ -388,14 +378,16 @@ func ensureUpstreamPrefix(path string) string {
 }
 
 type HTTPServer struct {
-	logger *slog.Logger
-	K8s    *kubernetes.Client
+	logger    *slog.Logger
+	K8s       *kubernetes.Client
+	namespace string
 }
 
-func NewHTTPClientProxy(logger *slog.Logger, k8s *kubernetes.Client) *HTTPServer {
+func NewHTTPClientProxy(logger *slog.Logger, k8s *kubernetes.Client, namespace string) *HTTPServer {
 	return &HTTPServer{
-		logger: logger,
-		K8s:    k8s,
+		logger:    logger,
+		K8s:       k8s,
+		namespace: namespace,
 	}
 }
 
@@ -437,7 +429,7 @@ func (server *HTTPServer) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 	// The Service's getambassador.io/config annotation contains the real host:port
 	// that Hatchery set at launch time — accounts for external nodes, ECS ALBs,
 	// GPU NodePorts, etc. Falls back to DNS+80 when annotation is absent.
-	upstreamStr, err := LookupUpstreamWithFallback(ctx, server.K8s, remoteUser, identityRaw, remoteUserRaw)
+	upstreamStr, err := LookupUpstreamWithFallback(ctx, server.K8s, server.namespace, remoteUser, identityRaw, remoteUserRaw)
 	if err != nil {
 		uid := ParseRemoteUserID(identityRaw)
 		if uid == "" {

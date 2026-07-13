@@ -3,6 +3,8 @@ package config
 import (
 	"os"
 	"strconv"
+
+	"github.com/uc-cdis/workspace-proxy/internal/validation"
 )
 
 func validPort(s string) bool {
@@ -26,13 +28,9 @@ type JEGConfig struct {
 }
 
 func Load() Config {
-	port := envOrDefault("LISTEN_ADDR", "")
-	if !validPort(port) {
-		port = "8080"
-	}
 	return Config{
 		ListenAddr:         ":" + envOrDefaultWithValidation("LISTEN_ADDR", "8080", validPort),
-		WorkspaceNamespace: envOrDefault("WORKSPACE_NAMESPACE", "jupyter-pods"),
+		WorkspaceNamespace: envOrDefaultWithValidation("WORKSPACE_NAMESPACE", "jupyter-pods", validation.IsDNS1123Label),
 		JEG: JEGConfig{
 			GatewayURL:       envOrDefault("JEG_GATEWAY_URL", ""),
 			KernelSpecPolicy: envOrDefault("JEG_KERNEL_SPEC_POLICY", ""),

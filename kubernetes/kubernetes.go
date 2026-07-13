@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/uc-cdis/workspace-proxy/internal/validation"
 )
 
 // ---- Kubernetes service discovery ----
@@ -88,15 +90,28 @@ func serviceFromK8sItem(item k8sServiceItem, namespace string) K8sService {
 	}
 }
 
-func (k8s *Client) getJSON(ctx context.Context, apiURL string, out any) (*http.Response, error) {
+type apiStatusError struct {
+	statusCode int
+	status     string
+	body       string
+}
+
+func (e *apiStatusError) Error() string {
+	if e.body == "" {
+		return fmt.Sprintf("Kubernetes API returned %s", e.status)
+	}
+	return fmt.Sprintf("Kubernetes API returned %s: %s", e.status, e.body)
+}
+
+func (k8s *Client) getJSON(ctx context.Context, apiURL string, out any) error {
 	token, err := k8s.bearerToken()
 	if err != nil {
-		return nil, fmt.Errorf("service account token unavailable: %w", err)
+		return fmt.Errorf("service account token unavailable: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, http.NoBody)
 	if err != nil {
-		return nil, fmt.Errorf("create Kubernetes request: %w", err)
+		return fmt.Errorf("create Kubernetes request: %w", err)
 	}
 
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -104,29 +119,35 @@ func (k8s *Client) getJSON(ctx context.Context, apiURL string, out any) (*http.R
 
 	resp, err := k8s.http.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("call Kubernetes API: %w", err)
+		return fmt.Errorf("call Kubernetes API: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return resp, k8sAPIStatusError(resp)
+		return newAPIStatusError(resp)
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
-		return resp, fmt.Errorf("decode Kubernetes response: %w", err)
+		return fmt.Errorf("decode Kubernetes response: %w", err)
 	}
 
-	return resp, nil
+	return nil
 }
 
-func k8sAPIStatusError(resp *http.Response) error {
+func newAPIStatusError(resp *http.Response) error {
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
-
-	return fmt.Errorf("k8s API returned %s: %s", resp.Status, strings.TrimSpace(string(body)))
+	return &apiStatusError{
+		statusCode: resp.StatusCode,
+		status:     resp.Status,
+		body:       strings.TrimSpace(string(body)),
+	}
 }
 
 func (k8s *Client) ListWorkspaceServices(ctx context.Context) ([]K8sService, error) {
 	const pageLimit = 500
+	if err := requireDNS1123Label("namespace", k8s.namespace); err != nil {
+		return nil, err
+	}
 
 	baseURL, err := url.JoinPath(k8s.apiBase, "api", "v1", "namespaces", k8s.namespace, "services")
 	if err != nil {
@@ -135,6 +156,7 @@ func (k8s *Client) ListWorkspaceServices(ctx context.Context) ([]K8sService, err
 
 	services := make([]K8sService, 0)
 	continueToken := ""
+	seenContinueTokens := make(map[string]struct{})
 
 	for {
 		pageURL, err := url.Parse(baseURL)
@@ -150,7 +172,7 @@ func (k8s *Client) ListWorkspaceServices(ctx context.Context) ([]K8sService, err
 		pageURL.RawQuery = query.Encode()
 
 		var raw k8sServiceListResponse
-		if _, err := k8s.getJSON(ctx, pageURL.String(), &raw); err != nil {
+		if err := k8s.getJSON(ctx, pageURL.String(), &raw); err != nil {
 			return nil, fmt.Errorf("list Kubernetes services: %w", err)
 		}
 
@@ -161,6 +183,10 @@ func (k8s *Client) ListWorkspaceServices(ctx context.Context) ([]K8sService, err
 		if raw.Metadata.Continue == "" {
 			break
 		}
+		if _, seen := seenContinueTokens[raw.Metadata.Continue]; seen {
+			return nil, fmt.Errorf("list Kubernetes services: API repeated continue token")
+		}
+		seenContinueTokens[raw.Metadata.Continue] = struct{}{}
 		continueToken = raw.Metadata.Continue
 	}
 
@@ -168,8 +194,11 @@ func (k8s *Client) ListWorkspaceServices(ctx context.Context) ([]K8sService, err
 }
 
 func (k8s *Client) GetWorkspaceService(ctx context.Context, name string) (K8sService, error) {
-	if strings.TrimSpace(name) == "" {
-		return K8sService{}, fmt.Errorf("workspace service name is required")
+	if err := requireDNS1123Label("namespace", k8s.namespace); err != nil {
+		return K8sService{}, err
+	}
+	if err := requireDNS1123Label("workspace service name", name); err != nil {
+		return K8sService{}, err
 	}
 
 	apiURL, err := url.JoinPath(k8s.apiBase, "api", "v1", "namespaces", k8s.namespace, "services", name)
@@ -178,9 +207,10 @@ func (k8s *Client) GetWorkspaceService(ctx context.Context, name string) (K8sSer
 	}
 
 	var raw k8sServiceItem
-	resp, err := k8s.getJSON(ctx, apiURL, &raw)
+	err = k8s.getJSON(ctx, apiURL, &raw)
 	if err != nil {
-		if resp != nil && resp.StatusCode == http.StatusNotFound {
+		var statusErr *apiStatusError
+		if errors.As(err, &statusErr) && statusErr.statusCode == http.StatusNotFound {
 			return K8sService{}, fmt.Errorf("workspace service %q not found", name)
 		}
 
@@ -198,7 +228,7 @@ func (c *Client) bearerToken() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("read service account token from %q: %w", c.tokenPath, err)
 	}
-	token := strings.TrimRight(string(b), "\r\n")
+	token := strings.TrimSpace(string(b))
 	if token == "" {
 		return "", fmt.Errorf("service account token file %q is empty", c.tokenPath)
 	}
@@ -208,6 +238,10 @@ func (c *Client) bearerToken() (string, error) {
 var ErrNotInCluster = errors.New("not running in-cluster")
 
 func New(namespace string) (*Client, error) {
+	if err := requireDNS1123Label("namespace", namespace); err != nil {
+		return nil, err
+	}
+
 	// Check presence only; bearerToken reads the file later so rotated tokens are picked up.
 	if _, err := os.Stat(tokenPath); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -245,4 +279,14 @@ func New(namespace string) (*Client, error) {
 		apiBase:   apiBase,
 		namespace: namespace,
 	}, nil
+}
+
+func requireDNS1123Label(field, value string) error {
+	if value == "" {
+		return fmt.Errorf("%s is required", field)
+	}
+	if !validation.IsDNS1123Label(value) {
+		return fmt.Errorf("%s %q must be a valid DNS-1123 label", field, value)
+	}
+	return nil
 }

@@ -65,7 +65,7 @@ func (jeg *JEG) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Resolve the user's micro-container upstream (soft-fail: empty string if not running).
 	// Used to fetch local kernelspecs, route local kernel launches, and proxy contents/sessions.
-	microUpstream, _ := workspace.LookupUpstreamWithFallback(ctx, jeg.K8s, remoteUser, identityRaw, remoteUserRaw)
+	microUpstream, _ := workspace.LookupUpstreamWithFallback(ctx, jeg.K8s, jeg.workspaceNamespace, remoteUser, identityRaw, remoteUserRaw)
 
 	// ---- Route dispatch ----
 

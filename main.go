@@ -117,8 +117,8 @@ func main() {
 		slog.Error("failed to create k8s client: %v", slog.Any("error", err))
 		os.Exit(1)
 	}
-	jeg := jeg.New(logger, k8s, cfg.JEG.GatewayURL, cfg.JEG.KernelSpecPolicy)
-	proxy := workspace.NewHTTPClientProxy(logger, k8s)
+	jeg := jeg.New(logger, k8s, cfg.WorkspaceNamespace, cfg.JEG.GatewayURL, cfg.JEG.KernelSpecPolicy)
+	proxy := workspace.NewHTTPClientProxy(logger, k8s, cfg.WorkspaceNamespace)
 
 	server := &http.Server{
 		Addr:              cfg.ListenAddr,

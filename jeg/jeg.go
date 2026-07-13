@@ -56,6 +56,7 @@ type jegKernelPolicy struct {
 type JEG struct {
 	logger                 *slog.Logger
 	K8s                    *kubernetes.Client
+	workspaceNamespace     string
 	gatewayURL             string
 	kernelSpecPolicy       *jegKernelPolicy
 	sessionKernelOverrides sync.Map
@@ -77,7 +78,7 @@ func parseKernelSpecPolicy(raw string) (*jegKernelPolicy, error) {
 	return &p, nil
 }
 
-func New(logger *slog.Logger, k8s *kubernetes.Client, gatewayURL string, jegKernelSpecPolicy string) *JEG {
+func New(logger *slog.Logger, k8s *kubernetes.Client, workspaceNamespace, gatewayURL string, jegKernelSpecPolicy string) *JEG {
 	policy, err := parseKernelSpecPolicy(jegKernelSpecPolicy)
 	if err != nil {
 		// logger.Printf(
@@ -89,10 +90,11 @@ func New(logger *slog.Logger, k8s *kubernetes.Client, gatewayURL string, jegKern
 	}
 
 	return &JEG{
-		logger:           logger,
-		gatewayURL:       gatewayURL,
-		K8s:              k8s,
-		kernelSpecPolicy: policy,
+		logger:             logger,
+		gatewayURL:         gatewayURL,
+		K8s:                k8s,
+		workspaceNamespace: workspaceNamespace,
+		kernelSpecPolicy:   policy,
 	}
 }
 

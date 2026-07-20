@@ -110,7 +110,12 @@ func fetchContainerSessionMetadata(ctx context.Context, microBase, sessionID str
 	if err != nil {
 		return sessionMetadata{}, false
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			// Log the error or otherwise handle it.
+			log.Printf("failed to close response body: %v", err)
+		}
+	}()
 	if resp.StatusCode != http.StatusOK {
 		return sessionMetadata{}, false
 	}

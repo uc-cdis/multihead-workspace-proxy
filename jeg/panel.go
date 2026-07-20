@@ -88,7 +88,11 @@ func (jeg *JEG) panelHandler(w http.ResponseWriter, r *http.Request) {
 			)
 			return
 		}
-		defer resp.Body.Close()
+		defer func() {
+			if err := resp.Body.Close(); err != nil {
+				log.Printf("failed to close response body: %v", err)
+			}
+		}()
 		if resp.StatusCode != http.StatusOK {
 			http.Error(w, "JEG kernelspecs unavailable", resp.StatusCode)
 			jeg.logger.InfoContext(
@@ -141,7 +145,11 @@ func (jeg *JEG) panelHandler(w http.ResponseWriter, r *http.Request) {
 			)
 			return
 		}
-		defer resp.Body.Close()
+		defer func() {
+			if err := resp.Body.Close(); err != nil {
+				log.Printf("failed to close response body: %v", err)
+			}
+		}()
 		body, _ := io.ReadAll(resp.Body)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(resp.StatusCode)
@@ -249,7 +257,11 @@ func (jeg *JEG) panelHandler(w http.ResponseWriter, r *http.Request) {
 			)
 			return
 		}
-		defer resp.Body.Close()
+		defer func() {
+			if err := resp.Body.Close(); err != nil {
+				log.Printf("failed to close response body: %v", err)
+			}
+		}()
 		respBody, _ := io.ReadAll(resp.Body)
 		if resp.StatusCode >= 400 {
 			log.Printf(`{"msg":"JEG kernel launch error","user_hash":%q,"spec":%q,"status":%d,"body":%q}`,
@@ -306,7 +318,11 @@ func (jeg *JEG) panelHandler(w http.ResponseWriter, r *http.Request) {
 			)
 			return
 		}
-		defer resp.Body.Close()
+		defer func() {
+			if err := resp.Body.Close(); err != nil {
+				log.Printf("failed to close response body: %v", err)
+			}
+		}()
 		if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusNoContent {
 			w.WriteHeader(http.StatusNoContent)
 		} else {

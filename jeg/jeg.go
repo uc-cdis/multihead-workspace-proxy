@@ -361,7 +361,11 @@ func (jeg *JEG) findJEGKernelIDByName(remoteUser, kernelName string) string {
 	if err != nil {
 		return ""
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Printf("failed to close response body: %v", err)
+		}
+	}()
 	if resp.StatusCode != http.StatusOK {
 		return ""
 	}
@@ -418,7 +422,11 @@ func (jeg *JEG) listJEGKernels(remoteUser string) []jegKernelInfo {
 	if err != nil {
 		return nil
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Printf("failed to close response body: %v", err)
+		}
+	}()
 	if resp.StatusCode != http.StatusOK {
 		return nil
 	}
@@ -452,7 +460,11 @@ func fetchLocalKernelspecs(microBase, remoteUser string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Printf("failed to close response body: %v", err)
+		}
+	}()
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("container kernelspecs HTTP %d", resp.StatusCode)
 	}
@@ -611,7 +623,7 @@ func isValidKernelID(s string) bool {
 		return false
 	}
 	for _, c := range s {
-		if !((c >= 'a' && c <= 'f') || (c >= '0' && c <= '9') || c == '-') {
+		if (c < 'a' || c > 'f') && (c < '0' || c > '9') && c != '-' {
 			return false
 		}
 	}

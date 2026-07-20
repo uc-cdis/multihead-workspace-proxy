@@ -62,7 +62,7 @@ func service(cfg config.Config, logger *slog.Logger, k8s *kubernetes.Client, jeg
 	r.HandleFunc("/healthz", func(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprint(w, "ok")
+		_, _ = fmt.Fprint(w, "ok")
 	})
 
 	r.Get("/version", func(w http.ResponseWriter, r *http.Request) {
@@ -75,7 +75,7 @@ func service(cfg config.Config, logger *slog.Logger, k8s *kubernetes.Client, jeg
 
 	r.Get("/slow", func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(10 * time.Second)
-		w.Write(fmt.Appendf(nil, "all done.\n"))
+		_, _ = w.Write(fmt.Appendf(nil, "all done.\n"))
 	})
 
 	r.Group(func(authenticated chi.Router) {

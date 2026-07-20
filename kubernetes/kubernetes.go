@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -121,7 +122,11 @@ func (k8s *Client) getJSON(ctx context.Context, apiURL string, out any) error {
 	if err != nil {
 		return fmt.Errorf("call Kubernetes API: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Printf("failed to close response body: %v", err)
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return newAPIStatusError(resp)

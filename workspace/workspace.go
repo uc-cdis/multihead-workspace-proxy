@@ -294,7 +294,7 @@ func resolveUpstream(ctx context.Context, k8s *kubernetes.Client, namespace, ser
 // lookupUpstreamWithFallback resolves upstream first by username-derived service name,
 // then by scanning workspace services for a matching REMOTE_USER uid annotation.
 func listWorkspaceServices(ctx context.Context, k8s *kubernetes.Client) ([]kubernetes.K8sService, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
 	// Return cached list if still fresh.

@@ -113,7 +113,11 @@ func (jeg *JEG) proxyHandler(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				return http.StatusBadGateway, nil, nil, err
 			}
-			defer resp.Body.Close()
+			defer func() {
+				if err := resp.Body.Close(); err != nil {
+					log.Printf("failed to close response body: %v", err)
+				}
+			}()
 			log.Printf("&14 statusCode=%d", resp.StatusCode)
 			log.Printf("&15 responseHeaders=%v", resp.Header)
 			respBody, _ := io.ReadAll(resp.Body)
@@ -495,7 +499,11 @@ func (jeg *JEG) proxyHandler(w http.ResponseWriter, r *http.Request) {
 					identity.SetUpstreamHeaders(pReq.Header, id)
 					pResp, pErr := http.DefaultClient.Do(pReq)
 					if pErr == nil {
-						defer pResp.Body.Close()
+						defer func() {
+							if err := pResp.Body.Close(); err != nil {
+								log.Printf("failed to close response body: %v", err)
+							}
+						}()
 						pBody, _ := io.ReadAll(pResp.Body)
 						pStatus := pResp.StatusCode
 						if pStatus == http.StatusCreated {
@@ -701,7 +709,9 @@ func (jeg *JEG) proxyHandler(w http.ResponseWriter, r *http.Request) {
 		var jegFiltered []byte
 		if jegErr == nil && jegResp.StatusCode == http.StatusOK {
 			rawJEG, _ := io.ReadAll(jegResp.Body)
-			jegResp.Body.Close()
+			if err := jegResp.Body.Close(); err != nil {
+				log.Printf("failed to close response body: %v", err)
+			}
 			jegFiltered = jeg.filterJEGKernelspecs(rawJEG)
 
 			// Ensure kernelspecs for currently running JEG kernels are
@@ -746,7 +756,9 @@ func (jeg *JEG) proxyHandler(w http.ResponseWriter, r *http.Request) {
 			}
 		} else {
 			if jegResp != nil {
-				jegResp.Body.Close()
+				if err := jegResp.Body.Close(); err != nil {
+					log.Printf("failed to close response body: %v", err)
+				}
 			}
 			jegFiltered = []byte(`{"default":"","kernelspecs":{}}`)
 		}
@@ -865,7 +877,11 @@ func (jeg *JEG) proxyHandler(w http.ResponseWriter, r *http.Request) {
 				)
 				return
 			}
-			defer resp.Body.Close()
+			defer func() {
+				if err := resp.Body.Close(); err != nil {
+					log.Printf("failed to close response body: %v", err)
+				}
+			}()
 			body, _ := io.ReadAll(resp.Body)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(resp.StatusCode)
@@ -915,7 +931,11 @@ func (jeg *JEG) proxyHandler(w http.ResponseWriter, r *http.Request) {
 			)
 			return
 		}
-		defer resp.Body.Close()
+		defer func() {
+			if err := resp.Body.Close(); err != nil {
+				log.Printf("failed to close response body: %v", err)
+			}
+		}()
 		if resp.StatusCode == http.StatusNotFound {
 			jeg.forgetJEGKernelID(kernelID)
 		}
@@ -949,7 +969,11 @@ func (jeg *JEG) proxyHandler(w http.ResponseWriter, r *http.Request) {
 		forwardJEGHeaders(jegReq)
 
 		if jegResp, err := http.DefaultClient.Do(jegReq); err == nil {
-			defer jegResp.Body.Close()
+			defer func() {
+				if err := jegResp.Body.Close(); err != nil {
+					log.Printf("failed to close response body: %v", err)
+				}
+			}()
 			var jegKernels []kernelEntry
 			if jegBody, err := io.ReadAll(jegResp.Body); err == nil {
 				log.Printf("jegBody %+v", string(jegBody))
@@ -975,7 +999,11 @@ func (jeg *JEG) proxyHandler(w http.ResponseWriter, r *http.Request) {
 			contReq, _ := http.NewRequest(http.MethodGet, containerURL, nil)
 			identity.SetUpstreamHeaders(contReq.Header, id)
 			if contResp, err := http.DefaultClient.Do(contReq); err == nil {
-				defer contResp.Body.Close()
+				defer func() {
+					if err := contResp.Body.Close(); err != nil {
+						log.Printf("failed to close response body: %v", err)
+					}
+				}()
 				var localKernels []kernelEntry
 				if contBody, err := io.ReadAll(contResp.Body); err == nil {
 					if json.Unmarshal(contBody, &localKernels) == nil {
@@ -1058,7 +1086,11 @@ func (jeg *JEG) proxyHandler(w http.ResponseWriter, r *http.Request) {
 				)
 				return
 			}
-			defer resp.Body.Close()
+			defer func() {
+				if err := resp.Body.Close(); err != nil {
+					log.Printf("failed to close response body: %v", err)
+				}
+			}()
 			if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusNoContent {
 				w.WriteHeader(http.StatusNoContent)
 			} else {
@@ -1111,7 +1143,11 @@ func (jeg *JEG) proxyHandler(w http.ResponseWriter, r *http.Request) {
 			)
 			return
 		}
-		defer resp.Body.Close()
+		defer func() {
+			if err := resp.Body.Close(); err != nil {
+				log.Printf("failed to close response body: %v", err)
+			}
+		}()
 		if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusNoContent {
 			w.WriteHeader(http.StatusNoContent)
 		} else {

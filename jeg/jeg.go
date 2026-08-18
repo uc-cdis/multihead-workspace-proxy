@@ -183,12 +183,22 @@ func parseKernelSpecPolicy(raw string) (*jegKernelPolicy, error) {
 func New(logger *slog.Logger, k8s *kubernetes.Client, workspaceNamespace, gatewayURL string, jegKernelSpecPolicy string) *JEG {
 	policy, err := parseKernelSpecPolicy(jegKernelSpecPolicy)
 	if err != nil {
-		// logger.Printf(
-		// 	`{"msg":"JEG_KERNEL_SPEC_POLICY parse error; ghost gateway will return empty specs","error":%q}`,
-		// 	err.Error(),
-		// )
+		logger.Error("JEG_KERNEL_SPEC_POLICY parse error; panel will fall back to unfiltered specs",
+			slog.String("error", err.Error()),
+		)
 
 		policy = &jegKernelPolicy{}
+	}
+
+	if len(policy.AllowedSpecs) == 0 {
+		logger.Warn("no JEG kernel spec policy configured; panel will offer every kernelspec JEG reports and the launch gate is inactive",
+			slog.Bool("env_var_set", strings.TrimSpace(jegKernelSpecPolicy) != ""),
+		)
+	} else {
+		logger.Info("JEG kernel spec policy loaded",
+			slog.Int("allowed_specs", len(policy.AllowedSpecs)),
+			slog.Any("spec_names", policy.AllowedSpecs),
+		)
 	}
 
 	return &JEG{
@@ -471,74 +481,15 @@ func fetchLocalKernelspecs(microBase, remoteUser string) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
-// filterJEGKernelspecs applies the kernel spec policy to the raw JEG response body,
-// returning a filtered JSON byte slice. Spec names not in allowedSpecs are dropped.
-// If no policy is configured, returns an empty kernelspecs object to prevent
-// JupyterLab from launching kernels directly without going through the billing panel.
+// filterJEGKernelspecs is the ghost-gateway-side filter used by JupyterLab's
+// kernel picker. It hides all launchable JEG kernels so they do not appear in
+// the micro-container UI before a user launches one from the Kernel Lifecycle
+// panel. Currently running JEG kernels are added back by the /api/kernelspecs
+// route so notebooks can attach to them.
+//
+// allowedSpecs applies to the panel only, via filterJEGKernelspecsForPanel.
 func (jeg *JEG) filterJEGKernelspecs(rawBody []byte) []byte {
-	if jeg.kernelSpecPolicy == nil || len(jeg.kernelSpecPolicy.AllowedSpecs) == 0 {
-		// No policy: return empty spec list. JupyterLab sees "no kernels" in its picker.
-		return []byte(`{"default":"","kernelspecs":{}}`)
-	}
-
-	var raw struct {
-		Default     string                     `json:"default"`
-		Kernelspecs map[string]json.RawMessage `json:"kernelspecs"`
-	}
-	if err := json.Unmarshal(rawBody, &raw); err != nil {
-		return []byte(`{"default":"","kernelspecs":{}}`)
-	}
-
-	filtered := make(map[string]json.RawMessage, len(jeg.kernelSpecPolicy.AllowedSpecs))
-	for _, name := range jeg.kernelSpecPolicy.AllowedSpecs {
-		if spec, ok := raw.Kernelspecs[name]; ok {
-			// Inject cost/nodeType metadata into the spec.
-			// We do a minimal JSON merge: parse, add fields, re-encode.
-			var specObj map[string]interface{}
-			if err := json.Unmarshal(spec, &specObj); err == nil {
-				inner, _ := specObj["spec"].(map[string]interface{})
-				if inner == nil {
-					inner = map[string]interface{}{}
-					specObj["spec"] = inner
-				}
-				meta, _ := inner["metadata"].(map[string]interface{})
-				if meta == nil {
-					meta = map[string]interface{}{}
-					inner["metadata"] = meta
-				}
-				meta["costPerHour"] = jeg.kernelSpecPolicy.CostPerHour[name]
-				meta["nodeType"] = jeg.kernelSpecPolicy.NodeType[name]
-				if dn, ok := jeg.kernelSpecPolicy.DisplayNames[name]; ok {
-					inner["display_name"] = dn
-				}
-				if b, err := json.Marshal(specObj); err == nil {
-					filtered[name] = b
-					continue
-				}
-			}
-			filtered[name] = spec // fallback: raw spec unchanged
-		}
-	}
-
-	defaultSpec := raw.Default
-	if _, ok := filtered[defaultSpec]; !ok {
-		defaultSpec = ""
-		if len(jeg.kernelSpecPolicy.AllowedSpecs) > 0 {
-			if _, ok := filtered[jeg.kernelSpecPolicy.AllowedSpecs[0]]; ok {
-				defaultSpec = jeg.kernelSpecPolicy.AllowedSpecs[0]
-			}
-		}
-	}
-
-	result := map[string]interface{}{
-		"default":     defaultSpec,
-		"kernelspecs": filtered,
-	}
-	b, err := json.Marshal(result)
-	if err != nil {
-		return []byte(`{"default":"","kernelspecs":{}}`)
-	}
-	return b
+	return []byte(`{"default":"","kernelspecs":{}}`)
 }
 
 // isLocalContainerSpec does a stateless live lookup: asks the container whether
@@ -666,6 +617,9 @@ func (jeg *JEG) filterJEGKernelspecsForPanel(rawBody []byte) []byte {
 	for _, name := range jeg.kernelSpecPolicy.AllowedSpecs {
 		spec, ok := raw.Kernelspecs[name]
 		if !ok {
+			jeg.logger.Warn("kernel spec in allowedSpecs not reported by JEG; it will not appear in the panel",
+				slog.String("spec", name),
+			)
 			continue
 		}
 		// Inject cost/nodeType/displayName metadata.

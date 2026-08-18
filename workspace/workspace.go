@@ -211,11 +211,7 @@ func lookupByAnnotationRemoteUser(k8s *kubernetes.Client, id identity.Identity) 
 
 		annotatedServiceCount++
 		if soleAnnotatedUpstream == "" {
-			if hostPort := ParseAmbassadorServiceField(annotYAML); hostPort != "" {
-				soleAnnotatedUpstream = "http://" + hostPort
-			} else {
-				soleAnnotatedUpstream = fmt.Sprintf("http://%s.%s.svc.cluster.local:%d", svc.Name, svc.Namespace, svc.Port)
-			}
+			soleAnnotatedUpstream = upstreamFromService(svc)
 		}
 
 		annotationRemoteUser := parseAmbassadorRemoteUserField(annotYAML)
@@ -223,11 +219,7 @@ func lookupByAnnotationRemoteUser(k8s *kubernetes.Client, id identity.Identity) 
 			continue
 		}
 
-		if hostPort := ParseAmbassadorServiceField(annotYAML); hostPort != "" {
-			return "http://" + hostPort, nil
-		}
-
-		return fmt.Sprintf("http://%s.%s.svc.cluster.local:%d", svc.Name, svc.Namespace, svc.Port), nil
+		return upstreamFromService(svc), nil
 	}
 
 	if annotatedServiceCount == 1 && soleAnnotatedUpstream != "" {
@@ -276,8 +268,6 @@ func LookupUpstreamWithFallback(ctx context.Context, k8s *kubernetes.Client, nam
 // resolveUpstream fetches the K8s Service object and returns the upstream URL,
 // preferring the host:port from the getambassador.io/config annotation.
 func resolveUpstream(ctx context.Context, k8s *kubernetes.Client, namespace, serviceName string) (string, error) {
-	log.Printf("!!!3b%+v", serviceName)
-	log.Printf("!!!3c%+v", namespace)
 	if k8s == nil {
 		// Not in-cluster (local dev without service account) — plain DNS + port 80.
 		return fmt.Sprintf("http://%s.%s.svc.cluster.local:80", serviceName, namespace), nil
@@ -285,10 +275,26 @@ func resolveUpstream(ctx context.Context, k8s *kubernetes.Client, namespace, ser
 
 	service, err := k8s.GetWorkspaceService(ctx, serviceName)
 	if err != nil {
-		log.Printf("!!!3d %+v", err)
+		return "", err
 	}
 
-	return fmt.Sprintf("http://%s.%s.svc.cluster.local:%d", service.Name, service.Namespace, service.Port), nil
+	return upstreamFromService(service), nil
+}
+
+// upstreamFromService resolves the upstream base URL for a workspace Service.
+// The getambassador.io/config annotation is the only correct source for
+// external-cluster nodes, GPU NodePorts and ECS/Fargate ALBs.
+func upstreamFromService(svc kubernetes.K8sService) string {
+	if hostPort := ParseAmbassadorServiceField(svc.Annotations["getambassador.io/config"]); hostPort != "" {
+		return "http://" + hostPort
+	}
+
+	port := svc.Port
+	if port == 0 {
+		port = 80
+	}
+
+	return fmt.Sprintf("http://%s.%s.svc.cluster.local:%d", svc.Name, svc.Namespace, port)
 }
 
 // lookupUpstreamWithFallback resolves upstream first by username-derived service name,

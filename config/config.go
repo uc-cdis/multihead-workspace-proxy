@@ -20,6 +20,14 @@ type Config struct {
 	ListenAddr         string
 	WorkspaceNamespace string
 	JEG                JEGConfig
+	Auth               AuthConfig
+}
+
+type AuthConfig struct {
+	// JWKSURL is fence's public key set used to verify access tokens.
+	JWKSURL string
+	// Issuer, if set, must match the iss claim of access tokens.
+	Issuer string
 }
 
 type JEGConfig struct {
@@ -34,6 +42,10 @@ func Load() Config {
 		JEG: JEGConfig{
 			GatewayURL:       envOrDefault("JEG_GATEWAY_URL", ""),
 			KernelSpecPolicy: envOrDefault("JEG_KERNEL_SPEC_POLICY", ""),
+		},
+		Auth: AuthConfig{
+			JWKSURL: envOrDefault("AUTH_JWKS_URL", "http://fence-service/.well-known/jwks"),
+			Issuer:  envOrDefault("AUTH_ISSUER", ""),
 		},
 	}
 }

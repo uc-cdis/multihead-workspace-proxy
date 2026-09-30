@@ -6,3 +6,5 @@ require (
 	github.com/go-chi/chi/v5 v5.3.1
 	github.com/go-chi/httplog/v3 v3.4.0
 )
+
+require github.com/golang-jwt/jwt/v5 v5.3.1 // indirect

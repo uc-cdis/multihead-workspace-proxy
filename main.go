@@ -22,7 +22,7 @@ import (
 	"github.com/uc-cdis/workspace-proxy/workspace"
 )
 
-func service(cfg config.Config, logger *slog.Logger, k8s *kubernetes.Client, jeg *jeg.JEG, proxy *workspace.HTTPServer) http.Handler {
+func service(cfg config.Config, logger *slog.Logger, k8s *kubernetes.Client, jeg *jeg.JEG, proxy *workspace.HTTPServer, verifier *identity.Verifier) http.Handler {
 	logFormat := httplog.SchemaOTEL
 
 	// Start GC goroutine to evict stale in-memory state and prevent OOMKill over time.
@@ -32,6 +32,8 @@ func service(cfg config.Config, logger *slog.Logger, k8s *kubernetes.Client, jeg
 	logger.Info("workspace-proxy starting",
 		slog.String("listen", cfg.ListenAddr),
 		slog.Bool("k8s_discovery", k8s != nil),
+		slog.String("auth_jwks_url", cfg.Auth.JWKSURL),
+		slog.String("auth_issuer", cfg.Auth.Issuer),
 	)
 
 	r := chi.NewRouter()
@@ -79,7 +81,7 @@ func service(cfg config.Config, logger *slog.Logger, k8s *kubernetes.Client, jeg
 	})
 
 	r.Group(func(authenticated chi.Router) {
-		authenticated.Use(identity.Require)
+		authenticated.Use(verifier.Require)
 
 		// JEG ghost-gateway: intercept JupyterLab's GatewayClient traffic and apply billing gate.
 		if cfg.JEG.GatewayURL != "" {
@@ -120,10 +122,11 @@ func main() {
 	}
 	jeg := jeg.New(logger, k8s, cfg.WorkspaceNamespace, cfg.JEG.GatewayURL, cfg.JEG.KernelSpecPolicy)
 	proxy := workspace.NewHTTPClientProxy(logger, k8s, cfg.WorkspaceNamespace)
+	verifier := identity.NewVerifier(cfg.Auth.JWKSURL, cfg.Auth.Issuer)
 
 	server := &http.Server{
 		Addr:              cfg.ListenAddr,
-		Handler:           service(cfg, logger, k8s, jeg, proxy),
+		Handler:           service(cfg, logger, k8s, jeg, proxy, verifier),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       0,
 		WriteTimeout:      0,

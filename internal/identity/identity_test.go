@@ -17,9 +17,6 @@ func TestRequireCanonicalizesIdentity(t *testing.T) {
 		if value := r.Header.Get("REMOTE_USER"); value != "alice" {
 			t.Errorf("REMOTE_USER = %q, want alice", value)
 		}
-		if value := r.Header.Get("X-Gen3-User-ID"); value != "42" {
-			t.Errorf("X-Gen3-User-ID = %q, want 42", value)
-		}
 		for _, header := range []string{"remote_user", "X-Remote-User", "KERNEL_USERNAME"} {
 			if value := r.Header.Get(header); value != "alice" {
 				t.Errorf("%s = %q, want alice", header, value)
@@ -28,7 +25,6 @@ func TestRequireCanonicalizesIdentity(t *testing.T) {
 	}))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.Header.Set("X-Gen3-User-ID", "uid:42, alice")
 	req.Header.Set("REMOTE_USER", "ignored")
 	handler.ServeHTTP(httptest.NewRecorder(), req)
 

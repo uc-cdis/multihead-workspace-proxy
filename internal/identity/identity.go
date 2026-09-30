@@ -18,24 +18,18 @@ type Identity struct {
 type contextKey struct{}
 
 // Require validates the trusted identity headers and stores their canonical form
-// in the request context. X-Gen3-User-ID takes precedence over REMOTE_USER.
+// in the request context. REMOTE_USER is required.
 func Require(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assertion := strings.TrimSpace(r.Header.Get("X-Gen3-User-ID"))
 		remoteUser := strings.TrimSpace(r.Header.Get("REMOTE_USER"))
-		if assertion == "" {
-			assertion = remoteUser
+		if remoteUser == "" {
+			http.Error(w, "REMOTE_USER missing", http.StatusInternalServerError)
+			return
 		}
 
 		id := Identity{
-			Username: normalizeUsername(assertion),
-			UID:      parseUID(assertion),
-		}
-		if id.Username == "" {
-			id.Username = normalizeUsername(remoteUser)
-		}
-		if id.UID == "" {
-			id.UID = parseUID(remoteUser)
+			Username: normalizeUsername(remoteUser),
+			UID:      parseUID(remoteUser),
 		}
 		if id.Username == "" {
 			http.Error(w, "Forbidden", http.StatusForbidden)
@@ -62,11 +56,6 @@ func SetUpstreamHeaders(h http.Header, id Identity) {
 	h.Set("remote_user", id.Username)
 	h.Set("X-Remote-User", id.Username)
 	h.Set("KERNEL_USERNAME", id.Username)
-	if id.UID != "" {
-		h.Set("X-Gen3-User-ID", id.UID)
-	} else {
-		h.Del("X-Gen3-User-ID")
-	}
 }
 
 // Hash returns a short digest suitable for PII-safe logs.

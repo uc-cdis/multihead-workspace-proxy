@@ -286,6 +286,12 @@ func resolveUpstream(ctx context.Context, k8s *kubernetes.Client, namespace, ser
 	service, err := k8s.GetWorkspaceService(ctx, serviceName)
 	if err != nil {
 		log.Printf("!!!3d %+v", err)
+		return "", err
+	}
+
+	// ECS workspaces have no backing pod; the annotation carries the real ALB host:port.
+	if hostPort := ParseAmbassadorServiceField(service.Annotations["getambassador.io/config"]); hostPort != "" {
+		return "http://" + hostPort, nil
 	}
 
 	return fmt.Sprintf("http://%s.%s.svc.cluster.local:%d", service.Name, service.Namespace, service.Port), nil

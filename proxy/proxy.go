@@ -25,6 +25,13 @@ func Proxy(w http.ResponseWriter, r *http.Request, target *url.URL) int {
 		return http.StatusInternalServerError
 	}
 
+	// ALBs drop a default port from Host, so Host and Origin must both omit it
+	// or Jupyter's websocket origin check fails with 403.
+	host := target.Host
+	if (target.Scheme == "http" && target.Port() == "80") || (target.Scheme == "https" && target.Port() == "443") {
+		host = target.Hostname()
+	}
+
 	status := http.StatusOK
 	rp := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
@@ -35,13 +42,13 @@ func Proxy(w http.ResponseWriter, r *http.Request, target *url.URL) int {
 			pr.Out.URL.Path = target.Path
 			pr.Out.URL.RawPath = target.RawPath
 			pr.Out.URL.RawQuery = target.RawQuery
-			pr.Out.Host = target.Host
+			pr.Out.Host = host
 			pr.SetXForwarded()
 
 			// Browsers send the public host as the WebSocket Origin. Jupyter
 			// validates it against the upstream host.
 			if strings.EqualFold(pr.In.Header.Get("Upgrade"), "websocket") && pr.Out.Header.Get("Origin") != "" {
-				pr.Out.Header.Set("Origin", target.Scheme+"://"+target.Host)
+				pr.Out.Header.Set("Origin", target.Scheme+"://"+host)
 			}
 		},
 		ModifyResponse: func(resp *http.Response) error {

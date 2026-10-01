@@ -120,6 +120,7 @@ func main() {
 	}
 	jeg := jeg.New(logger, k8s, cfg.WorkspaceNamespace, cfg.JEG.GatewayURL, cfg.JEG.KernelSpecPolicy)
 	proxy := workspace.NewHTTPClientProxy(logger, k8s, cfg.WorkspaceNamespace)
+	identity.Configure(identity.NewAuthorizer(cfg.Authz.ArboristURL, cfg.Authz.Resource, cfg.Authz.Method, cfg.Authz.Service))
 
 	server := &http.Server{
 		Addr:              cfg.ListenAddr,

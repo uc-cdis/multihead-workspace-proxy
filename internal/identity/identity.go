@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"log/slog"
 	"net/http"
 )
 
@@ -21,6 +22,14 @@ type contextKey struct{}
 
 // defaultAuthorizer is set once at startup by Configure and used by Require.
 var defaultAuthorizer *Authorizer
+
+var pkgLogger = slog.Default()
+
+func SetLogger(l *slog.Logger) {
+	if l != nil {
+		pkgLogger = l
+	}
+}
 
 // Configure sets the Authorizer that Require delegates to. It must be called
 // once, before the server starts handling requests.
@@ -37,21 +46,41 @@ func Configure(a *Authorizer) {
 func Require(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if defaultAuthorizer == nil {
+			pkgLogger.Error("workspace authz: authorizer not configured; rejecting",
+				slog.String("path", r.URL.Path))
 			http.Error(w, "Forbidden", http.StatusForbidden)
 			return
 		}
+
 		token := tokenFromRequest(r)
 		if token == "" {
+			// Distinguish *why* there is no token: cookie vs bearer header.
+			// This is the single most useful line for debugging "works in the
+			// browser page but API calls 401" — it shows whether the request
+			// actually carried the access_token cookie.
+			_, cookieErr := r.Cookie(AccessTokenCookie)
+			pkgLogger.Warn("workspace authz: no token on request",
+				slog.String("path", r.URL.Path),
+				slog.Bool("has_access_token_cookie", cookieErr == nil),
+				slog.Bool("has_authorization_header", r.Header.Get("Authorization") != ""))
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
+
 		id, err := defaultAuthorizer.authorize(r.Context(), token)
 		if err != nil {
-			// Do not distinguish "unauthenticated", "unauthorized" and
-			// "arborist unreachable" to the client; all fail closed.
+			// Do not distinguish the failure modes to the *client* (all fail
+			// closed), but always log the real reason server-side. err carries
+			// the arborist detail, e.g. "arborist denied request: status 403".
+			pkgLogger.Warn("workspace authz: denied",
+				slog.String("path", r.URL.Path),
+				slog.String("reason", err.Error()))
 			http.Error(w, "Forbidden", http.StatusForbidden)
 			return
 		}
+
+		pkgLogger.Debug("workspace authz: allowed",
+			slog.String("path", r.URL.Path))
 
 		SetUpstreamHeaders(r.Header, id)
 		ctx := context.WithValue(r.Context(), contextKey{}, id)

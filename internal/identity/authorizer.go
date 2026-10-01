@@ -14,7 +14,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -68,10 +67,6 @@ func (a *Authorizer) authorize(ctx context.Context, token string) (Identity, err
 
 	resp, err := a.client.Do(req)
 	if err != nil {
-		// Cannot reach arborist at all (DNS, NetworkPolicy egress, timeout).
-		pkgLogger.Error("arborist auth call failed",
-			slog.String("auth_url", a.authURL),
-			slog.String("err", err.Error()))
 		return Identity{}, fmt.Errorf("arborist auth request failed: %w", err)
 	}
 	defer func() {
@@ -82,23 +77,14 @@ func (a *Authorizer) authorize(ctx context.Context, token string) (Identity, err
 	// arborist returns 200 on allow, 403 on deny, 401 on a missing/invalid
 	// token, and 400 on a malformed request. Anything other than 200 is a deny.
 	if resp.StatusCode != http.StatusOK {
-		pkgLogger.Warn("arborist denied",
-			slog.Int("arborist_status", resp.StatusCode),
-			slog.String("resource", a.resource),
-			slog.String("method", a.method),
-			slog.String("service", a.service))
 		return Identity{}, fmt.Errorf("arborist denied request: status %d", resp.StatusCode)
 	}
 
 	username := strings.TrimSpace(resp.Header.Get("REMOTE_USER"))
 	if username == "" {
-		pkgLogger.Warn("arborist allowed but returned no REMOTE_USER")
 		return Identity{}, fmt.Errorf("arborist returned no REMOTE_USER")
 	}
-
-	id := Identity{Username: username}
-	pkgLogger.Debug("arborist allowed")
-	return id, nil
+	return Identity{Username: username}, nil
 }
 
 // tokenFromRequest extracts the fence access token from the access_token cookie

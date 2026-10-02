@@ -49,7 +49,7 @@ func Load() Config {
 			ArboristURL: envOrDefault("ARBORIST_URL", "http://arborist-service"),
 			Resource:    envOrDefault("AUTHZ_RESOURCE", "/workspace"),
 			Method:      envOrDefault("AUTHZ_METHOD", "access"),
-			Service:     envOrDefault("AUTHZ_SERVICE", "jupyterhub"),
+			Service:     envOrDefault("AUTHZ_SERVICE", "jupyterhub2"),
 		},
 		JEG: JEGConfig{
 			GatewayURL:       envOrDefault("JEG_GATEWAY_URL", ""),

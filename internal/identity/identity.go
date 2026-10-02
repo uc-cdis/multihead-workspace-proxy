@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"log/slog"
 	"net/http"
 )
 
@@ -47,6 +48,7 @@ func Require(next http.Handler) http.Handler {
 		}
 		id, err := defaultAuthorizer.authorize(r.Context(), token)
 		if err != nil {
+			slog.Error("authz failed", "err", err)
 			// Do not distinguish "unauthenticated", "unauthorized" and
 			// "arborist unreachable" to the client; all fail closed.
 			http.Error(w, "Forbidden", http.StatusForbidden)

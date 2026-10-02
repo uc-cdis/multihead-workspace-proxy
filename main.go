@@ -104,7 +104,7 @@ func main() {
 		ReplaceAttr: logFormat.ReplaceAttr,
 	})).With(
 		slog.String("app", "multihead-workspace-proxy"),
-		slog.String("version", "v0.0.1"),
+		slog.String("version", "v0.0.2"),
 		slog.String("env", "qa"),
 	)
 	slog.SetDefault(logger)

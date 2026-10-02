@@ -104,7 +104,7 @@ func main() {
 		ReplaceAttr: logFormat.ReplaceAttr,
 	})).With(
 		slog.String("app", "multihead-workspace-proxy"),
-		slog.String("version", "v0.0.1"),
+		slog.String("version", "v0.0.2"),
 		slog.String("env", "qa"),
 	)
 	slog.SetDefault(logger)
@@ -120,6 +120,7 @@ func main() {
 	}
 	jeg := jeg.New(logger, k8s, cfg.WorkspaceNamespace, cfg.JEG.GatewayURL, cfg.JEG.KernelSpecPolicy)
 	proxy := workspace.NewHTTPClientProxy(logger, k8s, cfg.WorkspaceNamespace)
+	identity.Configure(identity.NewAuthorizer(cfg.Authz.ArboristURL, cfg.Authz.Resource, cfg.Authz.Method, cfg.Authz.Service))
 
 	server := &http.Server{
 		Addr:              cfg.ListenAddr,

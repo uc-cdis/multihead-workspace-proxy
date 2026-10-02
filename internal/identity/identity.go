@@ -1,12 +1,15 @@
-// Package identity defines the trusted user identity established by the edge proxy.
+// Package identity defines the canonical user identity for an authenticated
+// request and the Require middleware that establishes it. Require delegates to
+// an Authorizer (see authorizer.go) that is configured once at startup and
+// checks each request against arborist.
 package identity
 
 import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"log/slog"
 	"net/http"
-	"strings"
 )
 
 // Identity is the canonical user identity for an authenticated request.
@@ -17,33 +20,41 @@ type Identity struct {
 
 type contextKey struct{}
 
-// Require validates the trusted identity headers and stores their canonical form
-// in the request context. X-Gen3-User-ID takes precedence over REMOTE_USER.
+// defaultAuthorizer is set once at startup by Configure and used by Require.
+var defaultAuthorizer *Authorizer
+
+// Configure sets the Authorizer that Require delegates to. It must be called
+// once, before the server starts handling requests.
+func Configure(a *Authorizer) {
+	defaultAuthorizer = a
+}
+
+// Require authenticates and authorizes the request via arborist, stores the
+// resolved identity in the request context, and overwrites the upstream
+// identity headers with the verified values before any handler can forward
+// them. It fails closed: a missing/unconfigured authorizer, a missing token,
+// an arborist error, a non-200 response, or an empty username all reject the
+// request.
 func Require(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assertion := strings.TrimSpace(r.Header.Get("X-Gen3-User-ID"))
-		remoteUser := strings.TrimSpace(r.Header.Get("REMOTE_USER"))
-		if assertion == "" {
-			assertion = remoteUser
+		if defaultAuthorizer == nil {
+			http.Error(w, "Forbidden", http.StatusForbidden)
+			return
 		}
-
-		id := Identity{
-			Username: normalizeUsername(assertion),
-			UID:      parseUID(assertion),
+		token := tokenFromRequest(r)
+		if token == "" {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
 		}
-		if id.Username == "" {
-			id.Username = normalizeUsername(remoteUser)
-		}
-		if id.UID == "" {
-			id.UID = parseUID(remoteUser)
-		}
-		if id.Username == "" {
+		id, err := defaultAuthorizer.authorize(r.Context(), token)
+		if err != nil {
+			slog.Error("authz failed", "err", err)
+			// Do not distinguish "unauthenticated", "unauthorized" and
+			// "arborist unreachable" to the client; all fail closed.
 			http.Error(w, "Forbidden", http.StatusForbidden)
 			return
 		}
 
-		// Replace trusted headers with canonical values before any handler can
-		// forward them. The edge proxy must strip client-supplied versions.
 		SetUpstreamHeaders(r.Header, id)
 		ctx := context.WithValue(r.Context(), contextKey{}, id)
 		next.ServeHTTP(w, r.WithContext(ctx))
@@ -56,44 +67,17 @@ func FromContext(ctx context.Context) (Identity, bool) {
 	return id, ok
 }
 
-// SetUpstreamHeaders overwrites the identity headers sent to upstream services.
+// SetUpstreamHeaders overwrites the identity headers sent to upstream services
+// with the verified identity. Any client-supplied values are replaced.
 func SetUpstreamHeaders(h http.Header, id Identity) {
 	h.Set("REMOTE_USER", id.Username)
 	h.Set("remote_user", id.Username)
 	h.Set("X-Remote-User", id.Username)
 	h.Set("KERNEL_USERNAME", id.Username)
-	if id.UID != "" {
-		h.Set("X-Gen3-User-ID", id.UID)
-	} else {
-		h.Del("X-Gen3-User-ID")
-	}
 }
 
 // Hash returns a short digest suitable for PII-safe logs.
 func Hash(id Identity) string {
 	sum := sha256.Sum256([]byte(id.Username))
 	return fmt.Sprintf("%x", sum[:8])
-}
-
-func normalizeUsername(assertion string) string {
-	v := strings.TrimSpace(assertion)
-	if strings.HasPrefix(v, "uid:") {
-		parts := strings.SplitN(v, ",", 2)
-		if len(parts) == 2 {
-			if username := strings.TrimSpace(parts[1]); username != "" {
-				return username
-			}
-		}
-	}
-	return v
-}
-
-func parseUID(assertion string) string {
-	v := strings.TrimSpace(assertion)
-	if !strings.HasPrefix(v, "uid:") {
-		return ""
-	}
-	v = strings.TrimPrefix(v, "uid:")
-	parts := strings.SplitN(v, ",", 2)
-	return strings.TrimSpace(parts[0])
 }

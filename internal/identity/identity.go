@@ -20,8 +20,12 @@ type Identity struct {
 
 type contextKey struct{}
 
+type authorizer interface {
+	authorize(ctx context.Context, token string) (Identity, error)
+}
+
 // defaultAuthorizer is set once at startup by Configure and used by Require.
-var defaultAuthorizer *Authorizer
+var defaultAuthorizer authorizer
 
 // Configure sets the Authorizer that Require delegates to. It must be called
 // once, before the server starts handling requests.

@@ -1,13 +1,5 @@
 // Authorizer authenticates and authorizes requests by delegating to arborist,
-// the Gen3 policy engine. The user's fence access token (from the access_token
-// cookie or an Authorization bearer header) is forwarded to arborist's
-// /auth/proxy endpoint, which verifies the token signature against fence's
-// JWKS and evaluates policy. On allow (HTTP 200) arborist returns the resolved
-// username in the REMOTE_USER response header; that single trusted answer is
-// used as the request identity by Require (see identity.go).
-//
-// This replaces trusting REMOTE_USER / X-Gen3-User-ID request headers, which
-// let any caller able to reach this service assert an arbitrary identity.
+// the Gen3 policy engine.
 package identity
 
 import (

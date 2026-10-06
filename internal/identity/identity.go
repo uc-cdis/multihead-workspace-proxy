@@ -1,7 +1,6 @@
 // Package identity defines the canonical user identity for an authenticated
-// request and the Require middleware that establishes it. Require delegates to
-// an Authorizer (see authorizer.go) that is configured once at startup and
-// checks each request against arborist.
+// request and the Require middleware that establishes it. Require delegates
+// security to an Authorizer (see authorizer.go).
 package identity
 
 import (
@@ -33,12 +32,11 @@ func Configure(a *Authorizer) {
 	defaultAuthorizer = a
 }
 
-// Require authenticates and authorizes the request via arborist, stores the
+// Require authenticates and authorizes, stores the
 // resolved identity in the request context, and overwrites the upstream
-// identity headers with the verified values before any handler can forward
-// them. It fails closed: a missing/unconfigured authorizer, a missing token,
-// an arborist error, a non-200 response, or an empty username all reject the
-// request.
+// identity headers.
+// It fails closed: a missing/unconfigured authorizer, a missing token,
+// an authorizer error... all reject the request.
 func Require(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if defaultAuthorizer == nil {
@@ -71,8 +69,8 @@ func FromContext(ctx context.Context) (Identity, bool) {
 	return id, ok
 }
 
-// SetUpstreamHeaders overwrites the identity headers sent to upstream services
-// with the verified identity. Any client-supplied values are replaced.
+// SetUpstreamHeaders sets/overwrites some request headers
+// with given identity.
 func SetUpstreamHeaders(h http.Header, id Identity) {
 	h.Set("REMOTE_USER", id.Username)
 	h.Set("remote_user", id.Username)

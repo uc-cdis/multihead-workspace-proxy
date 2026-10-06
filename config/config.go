@@ -20,6 +20,20 @@ type Config struct {
 	ListenAddr         string
 	WorkspaceNamespace string
 	JEG                JEGConfig
+	Authz              AuthzConfig
+}
+
+// AuthzConfig configures the arborist authentication/authorization check
+// applied to every workspace request.
+type AuthzConfig struct {
+	// ArboristURL is the base URL of the arborist service (e.g.
+	// http://arborist-service).
+	ArboristURL string
+	// Resource, Method and Service are the arborist authz check applied to
+	// every workspace request.
+	Resource string
+	Method   string
+	Service  string
 }
 
 type JEGConfig struct {
@@ -31,6 +45,12 @@ func Load() Config {
 	return Config{
 		ListenAddr:         ":" + envOrDefaultWithValidation("LISTEN_ADDR", "8080", validPort),
 		WorkspaceNamespace: envOrDefaultWithValidation("WORKSPACE_NAMESPACE", "jupyter-pods", validation.IsDNS1123Label),
+		Authz: AuthzConfig{
+			ArboristURL: envOrDefault("ARBORIST_URL", "http://arborist-service"),
+			Resource:    envOrDefault("AUTHZ_RESOURCE", "/workspace"),
+			Method:      envOrDefault("AUTHZ_METHOD", "access"),
+			Service:     envOrDefault("AUTHZ_SERVICE", "jupyterhub"),
+		},
 		JEG: JEGConfig{
 			GatewayURL:       envOrDefault("JEG_GATEWAY_URL", ""),
 			KernelSpecPolicy: envOrDefault("JEG_KERNEL_SPEC_POLICY", ""),

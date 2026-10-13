@@ -9,7 +9,6 @@ import (
 	"log"
 	"log/slog"
 	"net/http"
-	"net/http/httputil"
 	"net/url"
 	"strings"
 	"time"
@@ -43,7 +42,6 @@ func (jeg *JEG) proxyHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Common upstream headers forwarded to JEG.
 	forwardJEGHeaders := func(req *http.Request) {
-		log.Printf("REMOTE_USER %+v", remoteUser)
 		identity.SetUpstreamHeaders(req.Header, id)
 		req.Header.Del("Connection")
 		req.Header.Del("Upgrade")
@@ -71,45 +69,24 @@ func (jeg *JEG) proxyHandler(w http.ResponseWriter, r *http.Request) {
 		_ = r.Body.Close()
 
 		proxySessionToContainerBuffered := func() (int, http.Header, []byte, error) {
-			log.Printf("&1 microUpstream=%q", microUpstream)
 			if microUpstream == "" {
 				return http.StatusBadGateway, nil, nil, fmt.Errorf("workspace not running")
 			}
 			upstream := strings.TrimRight(microUpstream, "/") + proxy.UpstreamPrefix + jegPath
-			log.Printf("&2 upstream=%q", upstream)
-			log.Printf("&3 method=%q", method)
-			log.Printf("&4 jegPath=%q", jegPath)
-			log.Printf("&5 proxy.UpstreamPrefix=%q", proxy.UpstreamPrefix)
-			log.Printf("&6 body_len=%d", len(body))
 			req, _ := http.NewRequest(method, upstream, bytes.NewReader(body))
-			log.Printf("&7 req.URL=%q", req.URL.String())
 			for key := range r.Header {
-				log.Printf("&8 header_key=%q", key)
-
 				switch strings.ToLower(key) {
 				case "connection", "upgrade", "te", "trailers", "transfer-encoding":
-					log.Printf("&9 skipped_header=%q", key)
 					continue
 				}
 				req.Header[key] = r.Header[key]
-				log.Printf("&10 copied_header=%q value=%q", key, req.Header[key])
 			}
 			identity.SetUpstreamHeaders(req.Header, id)
-			log.Printf("&11 remoteUser=%q", remoteUser)
 			if r.URL.RawQuery != "" {
 				req.URL.RawQuery = r.URL.RawQuery
-				log.Printf("&12 rawQuery=%q", r.URL.RawQuery)
 			}
-
-			dump, err := httputil.DumpRequestOut(req, true)
-			if err != nil {
-				log.Fatal(err)
-			}
-
-			fmt.Printf("&77 %s\n", dump)
 
 			resp, err := http.DefaultClient.Do(req)
-			log.Printf("&13 err=%v", err)
 			if err != nil {
 				return http.StatusBadGateway, nil, nil, err
 			}
@@ -118,10 +95,7 @@ func (jeg *JEG) proxyHandler(w http.ResponseWriter, r *http.Request) {
 					log.Printf("failed to close response body: %v", err)
 				}
 			}()
-			log.Printf("&14 statusCode=%d", resp.StatusCode)
-			log.Printf("&15 responseHeaders=%v", resp.Header)
 			respBody, _ := io.ReadAll(resp.Body)
-			log.Printf("&16 respBodyLen=%d", len(respBody))
 			return resp.StatusCode, resp.Header, respBody, nil
 		}
 
@@ -286,10 +260,6 @@ func (jeg *JEG) proxyHandler(w http.ResponseWriter, r *http.Request) {
 			if microUpstream != "" && postKernelName != "" {
 				localSpec = isLocalContainerSpec(microUpstream, postKernelName, remoteUser)
 			}
-
-			log.Printf("&1 localSpec=%+v", localSpec)
-			log.Printf("&2 microUpstream=%+v", microUpstream)
-			log.Printf("&3 postKernelName=%+v", postKernelName)
 
 			// Local kernel — forward to container.
 			if localSpec {
@@ -958,8 +928,6 @@ func (jeg *JEG) proxyHandler(w http.ResponseWriter, r *http.Request) {
 
 	// GET /api/kernels — merge container running kernels + JEG running kernels.
 	if method == http.MethodGet && jegPath == "/api/kernels" {
-		log.Printf("jegPath %+v", jegPath)
-
 		type kernelEntry = json.RawMessage
 		var merged []kernelEntry
 		jegIDs := map[string]struct{}{}
@@ -976,7 +944,6 @@ func (jeg *JEG) proxyHandler(w http.ResponseWriter, r *http.Request) {
 			}()
 			var jegKernels []kernelEntry
 			if jegBody, err := io.ReadAll(jegResp.Body); err == nil {
-				log.Printf("jegBody %+v", string(jegBody))
 				_ = json.Unmarshal(jegBody, &jegKernels)
 				for _, entry := range jegKernels {
 					var k struct {

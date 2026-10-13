@@ -151,10 +151,6 @@ func evictSvcListCache() {
 // lookupUpstream returns the HTTP upstream base URL for the given username,
 // using the cache when valid and querying K8s when not.
 func lookupUpstream(ctx context.Context, k8s *kubernetes.Client, namespace, username string) (string, error) {
-
-	log.Printf("%+v", username)
-	log.Printf("%+v", &upstreamCache)
-
 	if v, ok := upstreamCache.Load(username); ok {
 		entry := v.(*upstreamEntry)
 		if time.Now().Before(entry.expires) {
@@ -165,10 +161,7 @@ func lookupUpstream(ctx context.Context, k8s *kubernetes.Client, namespace, user
 
 	svcName := userToServiceName(username)
 
-	log.Printf("!!!2%+v", svcName)
-
 	upstream, err := resolveUpstream(ctx, k8s, namespace, svcName)
-	log.Printf("!!!3a%+v", upstream)
 	if err != nil {
 		return "", err
 	}
@@ -200,8 +193,6 @@ func lookupByAnnotationRemoteUser(k8s *kubernetes.Client, id identity.Identity) 
 
 	annotatedServiceCount := 0
 	soleAnnotatedUpstream := ""
-
-	log.Printf("%+v", svcs)
 
 	for _, svc := range svcs {
 		annotYAML := svc.Annotations["getambassador.io/config"]
@@ -250,8 +241,6 @@ func LookupUpstreamWithFallback(ctx context.Context, k8s *kubernetes.Client, nam
 	uidHatcheryUser := fmt.Sprintf("%s, %s", id.UID, id.UID)
 	upstreamByUID, uidErr := lookupUpstream(ctx, k8s, namespace, uidHatcheryUser)
 
-	log.Printf("\t%+v\n", uidHatcheryUser)
-	log.Printf("\t%+v\n", upstreamByUID)
 	if uidErr != nil {
 		annotationUpstream, annotErr := lookupByAnnotationRemoteUser(k8s, id)
 		if annotErr != nil {
@@ -276,8 +265,6 @@ func LookupUpstreamWithFallback(ctx context.Context, k8s *kubernetes.Client, nam
 // resolveUpstream fetches the K8s Service object and returns the upstream URL,
 // preferring the host:port from the getambassador.io/config annotation.
 func resolveUpstream(ctx context.Context, k8s *kubernetes.Client, namespace, serviceName string) (string, error) {
-	log.Printf("!!!3b%+v", serviceName)
-	log.Printf("!!!3c%+v", namespace)
 	if k8s == nil {
 		// Not in-cluster (local dev without service account) — plain DNS + port 80.
 		return fmt.Sprintf("http://%s.%s.svc.cluster.local:80", serviceName, namespace), nil
@@ -285,7 +272,8 @@ func resolveUpstream(ctx context.Context, k8s *kubernetes.Client, namespace, ser
 
 	service, err := k8s.GetWorkspaceService(ctx, serviceName)
 	if err != nil {
-		log.Printf("!!!3d %+v", err)
+		// TODO: this error is swallowed and a bogus upstream is returned below.
+		log.Printf("workspace service lookup failed: %v", err)
 	}
 
 	return fmt.Sprintf("http://%s.%s.svc.cluster.local:%d", service.Name, service.Namespace, service.Port), nil
@@ -302,14 +290,10 @@ func listWorkspaceServices(ctx context.Context, k8s *kubernetes.Client) ([]kuber
 		return entry.items, nil
 	}
 
-	log.Printf("listWorkspaceServices")
-
 	services, err := k8s.ListWorkspaceServices(ctx)
 	if err != nil {
 		return []kubernetes.K8sService{}, err
 	}
-
-	log.Printf("%+v", services)
 
 	storeSvcListCache(services)
 	return services, nil

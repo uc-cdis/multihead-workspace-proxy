@@ -2,7 +2,10 @@ package workspace
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"html"
 	"log"
 	"log/slog"
 	"net/http"
@@ -33,9 +36,42 @@ func escapism(input string) string {
 	return sb.String()
 }
 
+// UsernameHashSHA256_16 names Hatchery's "username-hash" algorithm: the first
+// 16 bytes of the SHA-256 of the username as 32 lowercase hex chars.
+const UsernameHashSHA256_16 = "sha256-16"
+
+// usernameHash mirrors Hatchery's "username-hash" config ("" or
+// UsernameHashSHA256_16). It is set once at startup via SetUsernameHash,
+// before any request is served.
+var usernameHash string
+
+// SetUsernameHash selects how per-user service names are derived. It must
+// match Hatchery's "username-hash" setting.
+func SetUsernameHash(algo string) error {
+	switch algo {
+	case "", UsernameHashSHA256_16:
+		usernameHash = algo
+		return nil
+	default:
+		return fmt.Errorf("unsupported username hash %q: must be empty or %q", algo, UsernameHashSHA256_16)
+	}
+}
+
+// hashUserName32 implements UsernameHashSHA256_16, matching Hatchery's hashUserName32.
+func hashUserName32(username string) string {
+	sum := sha256.Sum256([]byte(username))
+	return hex.EncodeToString(sum[:16])
+}
+
 // userToServiceName derives the Hatchery per-user ClusterIP service name.
-// Matches pods.go: fmt.Sprintf("h-%s-s", escapism(userName))
+// Matches Hatchery's userToResourceName: "h-<safe>-s", where <safe> is
+// hashUserName32 when username-hash is sha256-16, escapism otherwise. Hatchery
+// derives the username from the REMOTE_USER header after html.EscapeString.
 func userToServiceName(username string) string {
+	username = html.EscapeString(username)
+	if usernameHash == UsernameHashSHA256_16 {
+		return fmt.Sprintf("h-%s-s", hashUserName32(username))
+	}
 	return fmt.Sprintf("h-%s-s", escapism(username))
 }
 
@@ -285,7 +321,7 @@ func resolveUpstream(ctx context.Context, k8s *kubernetes.Client, namespace, ser
 
 	service, err := k8s.GetWorkspaceService(ctx, serviceName)
 	if err != nil {
-		log.Printf("!!!3d %+v", err)
+		return "", err
 	}
 
 	return fmt.Sprintf("http://%s.%s.svc.cluster.local:%d", service.Name, service.Namespace, service.Port), nil

@@ -118,6 +118,10 @@ func main() {
 		slog.Error("failed to create k8s client: %v", slog.Any("error", err))
 		os.Exit(1)
 	}
+	if err := workspace.SetUsernameHash(cfg.UsernameHash); err != nil {
+		slog.Error("invalid USERNAME_HASH", slog.Any("error", err))
+		os.Exit(1)
+	}
 	jeg := jeg.New(logger, k8s, cfg.WorkspaceNamespace, cfg.JEG.GatewayURL, cfg.JEG.KernelSpecPolicy)
 	proxy := workspace.NewHTTPClientProxy(logger, k8s, cfg.WorkspaceNamespace)
 	identity.Configure(identity.NewAuthorizer(cfg.Authz.ArboristURL, cfg.Authz.Resource, cfg.Authz.Method, cfg.Authz.Service))

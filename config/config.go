@@ -19,8 +19,10 @@ func validPort(s string) bool {
 type Config struct {
 	ListenAddr         string
 	WorkspaceNamespace string
-	JEG                JEGConfig
-	Authz              AuthzConfig
+	// UsernameHash must match Hatchery's "username-hash" setting: "" or "sha256-16".
+	UsernameHash string
+	JEG          JEGConfig
+	Authz        AuthzConfig
 }
 
 // AuthzConfig configures the arborist authentication/authorization check
@@ -45,6 +47,7 @@ func Load() Config {
 	return Config{
 		ListenAddr:         ":" + envOrDefaultWithValidation("LISTEN_ADDR", "8080", validPort),
 		WorkspaceNamespace: envOrDefaultWithValidation("WORKSPACE_NAMESPACE", "jupyter-pods", validation.IsDNS1123Label),
+		UsernameHash:       envOrDefault("USERNAME_HASH", ""),
 		Authz: AuthzConfig{
 			ArboristURL: envOrDefault("ARBORIST_URL", "http://arborist-service"),
 			Resource:    envOrDefault("AUTHZ_RESOURCE", "/workspace"),

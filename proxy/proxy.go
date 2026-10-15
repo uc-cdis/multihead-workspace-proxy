@@ -38,9 +38,11 @@ func Proxy(w http.ResponseWriter, r *http.Request, target *url.URL) int {
 			pr.Out.Host = target.Host
 			pr.SetXForwarded()
 
-			// Browsers send the public host as the WebSocket Origin. Jupyter
-			// validates it against the upstream host.
-			if strings.EqualFold(pr.In.Header.Get("Upgrade"), "websocket") && pr.Out.Header.Get("Origin") != "" {
+			// Browsers send the public host as Origin, but Host is rewritten to
+			// the upstream above. Jupyter rejects state-changing requests
+			// (PUT, POST, DELETE, WebSocket upgrades) whose Origin does not match
+			// Host, answering with a misleading 404. Make them agree.
+			if pr.Out.Header.Get("Origin") != "" {
 				pr.Out.Header.Set("Origin", target.Scheme+"://"+target.Host)
 			}
 		},

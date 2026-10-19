@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 )
 
 // Identity is the canonical user identity for an authenticated request.
@@ -69,13 +70,51 @@ func FromContext(ctx context.Context) (Identity, bool) {
 	return id, ok
 }
 
-// SetUpstreamHeaders sets/overwrites some request headers
-// with given identity.
+// SetUpstreamHeaders sets/overwrites the identity headers sent to upstream
+// services and strips the user's Gen3 credentials (see StripCredentials).
+//
+// Require calls this on the inbound request right after authorization, so no
+// handler, log statement or upstream ever sees the user's access token.
 func SetUpstreamHeaders(h http.Header, id Identity) {
+	StripCredentials(h)
 	h.Set("REMOTE_USER", id.Username)
 	h.Set("remote_user", id.Username)
 	h.Set("X-Remote-User", id.Username)
 	h.Set("KERNEL_USERNAME", id.Username)
+}
+
+// StripCredentials removes the Fence access token from h: the access_token
+// cookie and any "Authorization: Bearer ..." header. The token is only needed
+// to authorize against arborist; forwarding it would hand a user's Gen3
+// credential to their workspace container and to JEG.
+//
+// Other cookies (e.g. Jupyter's _xsrf) and non-Bearer Authorization schemes
+// (e.g. Jupyter's "token ...") are left untouched.
+func StripCredentials(h http.Header) {
+	if scheme, _, _ := strings.Cut(h.Get("Authorization"), " "); strings.EqualFold(scheme, "Bearer") {
+		h.Del("Authorization")
+	}
+
+	// HTTP/2 clients may send cookies in several Cookie header lines, so
+	// filter every line and keep the remaining pairs byte-for-byte.
+	var kept []string
+	for _, line := range h.Values("Cookie") {
+		for _, pair := range strings.Split(line, ";") {
+			pair = strings.TrimSpace(pair)
+			if pair == "" {
+				continue
+			}
+			name, _, _ := strings.Cut(pair, "=")
+			if strings.TrimSpace(name) == AccessTokenCookie {
+				continue
+			}
+			kept = append(kept, pair)
+		}
+	}
+	h.Del("Cookie")
+	if len(kept) > 0 {
+		h.Set("Cookie", strings.Join(kept, "; "))
+	}
 }
 
 // Hash returns a short digest suitable for PII-safe logs.

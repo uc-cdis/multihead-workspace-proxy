@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -22,15 +21,13 @@ import (
 // ---- Kubernetes service discovery ----
 //
 // workspace-proxy queries the K8s API at request time (with per-user caching) to
-// resolve the actual upstream host:port for each user's workspace Service.
+// resolve each user's Hatchery workspace Service, and routes to that Service's
+// cluster-local DNS name and first port.
 //
-// Hatchery writes the routing target into the getambassador.io/config annotation:
-//   - Local cluster pod:   service: {svcName}.{namespace}.svc.cluster.local:80
-//   - External node/GPU:   service: {nodeIP}:{nodePort}  (random NodePort)
-//   - ECS/Fargate:         service: {albDNS}:{port}
-//
-// We extract that "service:" field so we never assume port 80 — GPU nodes,
-// external clusters, and ECS all have different ports assigned at launch time.
+// Note: Hatchery also writes a routing target into the getambassador.io/config
+// annotation (e.g. {nodeIP}:{nodePort} for external/GPU nodes, an ALB for
+// ECS). That annotation is not used; such workspaces only work if the
+// Service's cluster DNS name and first port also reach them.
 
 const (
 	tokenPath = "/var/run/secrets/kubernetes.io/serviceaccount/token"
@@ -50,24 +47,14 @@ type Client struct {
 }
 
 type K8sService struct {
-	Name        string
-	Port        int32
-	Namespace   string
-	Annotations map[string]string
-}
-
-type k8sServiceListResponse struct {
-	Metadata struct {
-		Continue string `json:"continue"`
-	} `json:"metadata"`
-
-	Items []k8sServiceItem `json:"items"`
+	Name      string
+	Port      int32
+	Namespace string
 }
 
 type k8sServiceItem struct {
 	Metadata struct {
-		Name        string            `json:"name"`
-		Annotations map[string]string `json:"annotations"`
+		Name string `json:"name"`
 	} `json:"metadata"`
 
 	Spec struct {
@@ -84,10 +71,9 @@ func serviceFromK8sItem(item k8sServiceItem, namespace string) K8sService {
 	}
 
 	return K8sService{
-		Name:        item.Metadata.Name,
-		Port:        port,
-		Namespace:   namespace,
-		Annotations: item.Metadata.Annotations,
+		Name:      item.Metadata.Name,
+		Port:      port,
+		Namespace: namespace,
 	}
 }
 
@@ -146,56 +132,6 @@ func newAPIStatusError(resp *http.Response) error {
 		status:     resp.Status,
 		body:       strings.TrimSpace(string(body)),
 	}
-}
-
-func (k8s *Client) ListWorkspaceServices(ctx context.Context) ([]K8sService, error) {
-	const pageLimit = 500
-	if err := requireDNS1123Label("namespace", k8s.namespace); err != nil {
-		return nil, err
-	}
-
-	baseURL, err := url.JoinPath(k8s.apiBase, "api", "v1", "namespaces", k8s.namespace, "services")
-	if err != nil {
-		return nil, fmt.Errorf("build Kubernetes services URL: %w", err)
-	}
-
-	services := make([]K8sService, 0)
-	continueToken := ""
-	seenContinueTokens := make(map[string]struct{})
-
-	for {
-		pageURL, err := url.Parse(baseURL)
-		if err != nil {
-			return nil, fmt.Errorf("parse Kubernetes services URL: %w", err)
-		}
-
-		query := pageURL.Query()
-		query.Set("limit", strconv.Itoa(pageLimit))
-		if continueToken != "" {
-			query.Set("continue", continueToken)
-		}
-		pageURL.RawQuery = query.Encode()
-
-		var raw k8sServiceListResponse
-		if err := k8s.getJSON(ctx, pageURL.String(), &raw); err != nil {
-			return nil, fmt.Errorf("list Kubernetes services: %w", err)
-		}
-
-		for _, item := range raw.Items {
-			services = append(services, serviceFromK8sItem(item, k8s.namespace))
-		}
-
-		if raw.Metadata.Continue == "" {
-			break
-		}
-		if _, seen := seenContinueTokens[raw.Metadata.Continue]; seen {
-			return nil, fmt.Errorf("list Kubernetes services: API repeated continue token")
-		}
-		seenContinueTokens[raw.Metadata.Continue] = struct{}{}
-		continueToken = raw.Metadata.Continue
-	}
-
-	return services, nil
 }
 
 func (k8s *Client) GetWorkspaceService(ctx context.Context, name string) (K8sService, error) {

@@ -109,7 +109,7 @@ func TestAuthorizeAllowReturnsIdentity(t *testing.T) {
 		t.Fatalf("authorize returned error: %v", err)
 	}
 	if id != (Identity{Username: "alice@example.com"}) {
-		t.Errorf("identity = %#v, want username alice@example.com (trimmed) and no UID", id)
+		t.Errorf("identity = %#v, want username alice@example.com (trimmed)", id)
 	}
 
 	calls := fa.Calls()

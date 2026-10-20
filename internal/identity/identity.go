@@ -15,7 +15,6 @@ import (
 // Identity is the canonical user identity for an authenticated request.
 type Identity struct {
 	Username string
-	UID      string
 }
 
 type contextKey struct{}

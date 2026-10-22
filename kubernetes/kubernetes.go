@@ -21,13 +21,17 @@ import (
 // ---- Kubernetes service discovery ----
 //
 // workspace-proxy queries the K8s API at request time (with per-user caching) to
-// resolve each user's Hatchery workspace Service, and routes to that Service's
-// cluster-local DNS name and first port.
+// resolve each user's Hatchery workspace Service.
 //
-// Note: Hatchery also writes a routing target into the getambassador.io/config
-// annotation (e.g. {nodeIP}:{nodePort} for external/GPU nodes, an ALB for
-// ECS). That annotation is not used; such workspaces only work if the
-// Service's cluster DNS name and first port also reach them.
+// Hatchery writes the routing target into the getambassador.io/config
+// annotation on that Service:
+//   - Local cluster pod:   service: {svcName}.{namespace}.svc.cluster.local:80
+//   - External node/GPU:   service: {nodeIP}:{nodePort}  (random NodePort)
+//   - ECS:                 service: {albDNS}:80
+//
+// The Service's annotations are returned so callers can route to that target.
+// External and ECS Services have no in-cluster endpoints, so their cluster DNS
+// name does not reach the workspace.
 
 const (
 	tokenPath = "/var/run/secrets/kubernetes.io/serviceaccount/token"
@@ -47,14 +51,16 @@ type Client struct {
 }
 
 type K8sService struct {
-	Name      string
-	Port      int32
-	Namespace string
+	Name        string
+	Port        int32
+	Namespace   string
+	Annotations map[string]string
 }
 
 type k8sServiceItem struct {
 	Metadata struct {
-		Name string `json:"name"`
+		Name        string            `json:"name"`
+		Annotations map[string]string `json:"annotations"`
 	} `json:"metadata"`
 
 	Spec struct {
@@ -71,9 +77,10 @@ func serviceFromK8sItem(item k8sServiceItem, namespace string) K8sService {
 	}
 
 	return K8sService{
-		Name:      item.Metadata.Name,
-		Port:      port,
-		Namespace: namespace,
+		Name:        item.Metadata.Name,
+		Port:        port,
+		Namespace:   namespace,
+		Annotations: item.Metadata.Annotations,
 	}
 }
 

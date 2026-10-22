@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -74,7 +76,8 @@ func LookupUpstream(ctx context.Context, k8s *kubernetes.Client, namespace, user
 }
 
 // resolveUpstream fetches the user's K8s Service object and returns its
-// cluster-local upstream URL.
+// upstream URL, preferring the routing target in Hatchery's
+// getambassador.io/config annotation over the Service's cluster-local DNS name.
 func resolveUpstream(ctx context.Context, k8s *kubernetes.Client, namespace, serviceName string) (string, error) {
 	if k8s == nil {
 		// Not in-cluster (local dev without service account) — plain DNS + port 80.
@@ -86,7 +89,53 @@ func resolveUpstream(ctx context.Context, k8s *kubernetes.Client, namespace, ser
 		return "", err
 	}
 
-	return fmt.Sprintf("http://%s.%s.svc.cluster.local:%d", service.Name, service.Namespace, service.Port), nil
+	return upstreamForService(service), nil
+}
+
+// upstreamForService returns the routing target from the Service's
+// getambassador.io/config annotation when present and valid, and otherwise the
+// Service's cluster-local DNS name and first port.
+func upstreamForService(service kubernetes.K8sService) string {
+	if upstream, ok := upstreamFromAmbassadorConfig(service.Annotations[ambassadorConfigAnnotation]); ok {
+		return upstream
+	}
+	return fmt.Sprintf("http://%s.%s.svc.cluster.local:%d", service.Name, service.Namespace, service.Port)
+}
+
+const ambassadorConfigAnnotation = "getambassador.io/config"
+
+// upstreamFromAmbassadorConfig returns the upstream URL described by Hatchery's
+// getambassador.io/config annotation: the top-level "service: host:port" key,
+// with an https scheme when the top-level "tls" key is true. Hatchery renders
+// the annotation from a fixed template (see hatchery pods.go ambassadorYaml),
+// so scanning top-level lines is sufficient. Returns false when the annotation
+// is absent or has no valid service target.
+func upstreamFromAmbassadorConfig(annotYAML string) (string, bool) {
+	var hostPort string
+	scheme := "http"
+	for _, line := range strings.Split(annotYAML, "\n") {
+		key, value, found := strings.Cut(strings.TrimRight(line, " \t\r"), ":")
+		if !found {
+			continue
+		}
+		switch key {
+		case "service":
+			hostPort = strings.TrimSpace(value)
+		case "tls":
+			if useTLS, err := strconv.ParseBool(strings.TrimSpace(value)); err == nil && useTLS {
+				scheme = "https"
+			}
+		}
+	}
+
+	host, port, err := net.SplitHostPort(hostPort)
+	if err != nil || host == "" || strings.ContainsAny(host, "/?#@") {
+		return "", false
+	}
+	if portNum, err := strconv.Atoi(port); err != nil || portNum < 1 || portNum > 65535 {
+		return "", false
+	}
+	return scheme + "://" + net.JoinHostPort(host, port), true
 }
 
 const upstreamPrefix = proxy.UpstreamPrefix

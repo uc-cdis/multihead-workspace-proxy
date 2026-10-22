@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -89,30 +90,64 @@ func resolveUpstream(ctx context.Context, k8s *kubernetes.Client, namespace, ser
 		return "", err
 	}
 
-	return upstreamForService(service), nil
+	return upstreamForService(service)
 }
 
 // upstreamForService returns the routing target from the Service's
 // getambassador.io/config annotation when present and valid, and otherwise the
 // Service's cluster-local DNS name and first port.
-func upstreamForService(service kubernetes.K8sService) string {
-	if upstream, ok := upstreamFromAmbassadorConfig(service.Annotations[ambassadorConfigAnnotation]); ok {
-		return upstream
+//
+// It never falls back to plain HTTP when the annotation asks for TLS: if the
+// annotation requests TLS but has no usable target, or has a tls value that is
+// not clearly true or false, it returns an error and the request fails.
+func upstreamForService(service kubernetes.K8sService) (string, error) {
+	upstream, ok, err := upstreamFromAmbassadorConfig(service.Annotations[ambassadorConfigAnnotation])
+	if err != nil {
+		return "", err
 	}
-	return fmt.Sprintf("http://%s.%s.svc.cluster.local:%d", service.Name, service.Namespace, service.Port)
+	if ok {
+		return upstream, nil
+	}
+	return fmt.Sprintf("http://%s.%s.svc.cluster.local:%d", service.Name, service.Namespace, service.Port), nil
 }
 
 const ambassadorConfigAnnotation = "getambassador.io/config"
+
+// errTLSWithoutTarget is returned when the annotation asks for TLS but has no
+// valid "service: host:port" target. Falling back to the Service's cluster DNS
+// name would silently send the request over plain HTTP.
+var errTLSWithoutTarget = errors.New(ambassadorConfigAnnotation + ` has "tls: true" but no valid service target`)
+
+// parseTLSconfig reads the annotation's tls value strictly. Hatchery
+// renders it from the container's "use-tls" setting, so only "true", "false"
+// and empty (setting omitted) are expected. Anything else (e.g. "yes", which
+// YAML-based routers treat as true) is an error rather than a guess, so a
+// request for TLS is never read as plain HTTP.
+func parseTLSconfig(value string) (bool, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "true":
+		return true, nil
+	case "false", "":
+		return false, nil
+	}
+	return false, fmt.Errorf("%s has unrecognized tls value %q (want true or false)", ambassadorConfigAnnotation, strings.TrimSpace(value))
+}
 
 // upstreamFromAmbassadorConfig returns the upstream URL described by Hatchery's
 // getambassador.io/config annotation: the top-level "service: host:port" key,
 // with an https scheme when the top-level "tls" key is true. Hatchery renders
 // the annotation from a fixed template (see hatchery pods.go ambassadorYaml),
-// so scanning top-level lines is sufficient. Returns false when the annotation
-// is absent or has no valid service target.
-func upstreamFromAmbassadorConfig(annotYAML string) (string, bool) {
+// so scanning top-level lines is sufficient.
+//
+// It returns:
+//   - (upstream, true, nil) when the annotation has a valid target;
+//   - ("", false, nil) when it has no valid target and does not ask for TLS,
+//     so the caller may fall back to the Service's cluster DNS name;
+//   - ("", false, err) when the tls value is unrecognized, or TLS is requested
+//     but there is no valid target. The caller must not fall back.
+func upstreamFromAmbassadorConfig(annotYAML string) (string, bool, error) {
 	var hostPort string
-	scheme := "http"
+	useTLS := false
 	for _, line := range strings.Split(annotYAML, "\n") {
 		key, value, found := strings.Cut(strings.TrimRight(line, " \t\r"), ":")
 		if !found {
@@ -122,12 +157,32 @@ func upstreamFromAmbassadorConfig(annotYAML string) (string, bool) {
 		case "service":
 			hostPort = strings.TrimSpace(value)
 		case "tls":
-			if useTLS, err := strconv.ParseBool(strings.TrimSpace(value)); err == nil && useTLS {
-				scheme = "https"
+			lineTLS, err := parseTLSconfig(value)
+			if err != nil {
+				return "", false, err
 			}
+			// A later "tls: false" never downgrades an earlier "tls: true".
+			useTLS = useTLS || lineTLS
 		}
 	}
 
+	scheme := "http"
+	if useTLS {
+		scheme = "https"
+	}
+	upstream, ok := upstreamURL(scheme, hostPort)
+	if !ok {
+		if useTLS {
+			return "", false, errTLSWithoutTarget
+		}
+		return "", false, nil
+	}
+	return upstream, true, nil
+}
+
+// upstreamURL builds scheme://host:port from hostPort, or returns false if
+// hostPort is not a plain host:port that round-trips through url.Parse.
+func upstreamURL(scheme, hostPort string) (string, bool) {
 	host, port, err := net.SplitHostPort(hostPort)
 	if err != nil || host == "" || strings.ContainsAny(host, "/?#@") {
 		return "", false
@@ -135,7 +190,13 @@ func upstreamFromAmbassadorConfig(annotYAML string) (string, bool) {
 	if portNum, err := strconv.Atoi(port); err != nil || portNum < 1 || portNum > 65535 {
 		return "", false
 	}
-	return scheme + "://" + net.JoinHostPort(host, port), true
+	upstream := scheme + "://" + net.JoinHostPort(host, port)
+	// Reject hosts url.Parse would refuse later (spaces, "%", "\\", ...), so
+	// they count as invalid here instead of failing after this check.
+	if u, err := url.Parse(upstream); err != nil || u.Host != net.JoinHostPort(host, port) {
+		return "", false
+	}
+	return upstream, true
 }
 
 const upstreamPrefix = proxy.UpstreamPrefix

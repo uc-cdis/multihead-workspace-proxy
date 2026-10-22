@@ -73,11 +73,6 @@ func service(cfg config.Config, logger *slog.Logger, k8s *kubernetes.Client, jeg
 		})
 	})
 
-	r.Get("/slow", func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(10 * time.Second)
-		_, _ = w.Write(fmt.Appendf(nil, "all done.\n"))
-	})
-
 	r.Group(func(authenticated chi.Router) {
 		authenticated.Use(identity.Require)
 
@@ -104,8 +99,6 @@ func main() {
 		ReplaceAttr: logFormat.ReplaceAttr,
 	})).With(
 		slog.String("app", "multihead-workspace-proxy"),
-		slog.String("version", "v0.0.2"),
-		slog.String("env", "qa"),
 	)
 	slog.SetDefault(logger)
 
